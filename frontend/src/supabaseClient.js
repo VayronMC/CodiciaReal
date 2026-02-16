@@ -1,14 +1,21 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = 'https://ktkijypjnamcblypdnsg.supabase.co'; 
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0a2lqeXBqbmFtY2JseXBkbnNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU1MDE3NDEsImV4cCI6MjA4MTA3Nzc0MX0.1WuXYf_5XtSLmwWR-nN3B-LMUIUzJ2quN6VJfOXwtKk';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Modificamos esta parte para usar sessionStorage en lugar de localStorage
-export const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    storage: window.sessionStorage, // <-- Esto es lo que hace la magia
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: true
-  }
-});
+const faltanVars = !supabaseUrl || !supabaseKey;
+
+export const configError = faltanVars
+  ? 'Faltan las variables de entorno. Asegúrate de tener un archivo .env en la carpeta frontend/ con VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY. Luego reinicia el servidor (npm run dev).'
+  : null;
+
+export const supabase = faltanVars
+  ? null
+  : createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        storage: window.sessionStorage,
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true
+      }
+    });
