@@ -450,13 +450,13 @@ const PuntoDeVenta = ({ session }) => {
       </div>
 
       {/* DERECHA: CARRITO */}
-      <div className="w-full lg:w-96 bg-white shadow-2xl flex flex-col border-l z-10">
-        <div className="p-5 border-b bg-gray-50 flex justify-between items-center">
+      <div className="w-full lg:w-96 bg-white shadow-2xl flex flex-col border-l z-10 h-screen">
+        <div className="p-5 border-b bg-gray-50 flex justify-between items-center flex-shrink-0">
           <h2 className="font-bold text-xl flex items-center gap-2"><ShoppingCart className="text-blue-600"/> Carrito</h2>
           <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded-full">{carrito.length} items</span>
         </div>
         
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        <div className="flex-1 overflow-y-auto p-4 space-y-2 min-h-0">
           {lineasVenta.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-gray-400 opacity-50"><ShoppingCart size={48} className="mb-2"/><p>Escanea un producto</p></div>
           ) : (
@@ -484,7 +484,7 @@ const PuntoDeVenta = ({ session }) => {
           )}
         </div>
 
-        <div className="p-6 bg-gray-900 text-white space-y-4">
+        <div className="p-6 bg-gray-900 text-white space-y-4 flex-shrink-0">
           {ultimoCambio && (
             <div className="bg-black/30 rounded-lg p-3 text-sm flex flex-col gap-1">
               <div className="flex justify-between"><span className="text-gray-300">Última venta:</span><span className="font-bold">{formatoMoneda(ultimoCambio.total)}</span></div>
