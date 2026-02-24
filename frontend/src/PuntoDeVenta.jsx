@@ -4,6 +4,7 @@ import { supabase } from './supabaseClient';
 import { ShoppingCart, Trash2, Search, Clock, DollarSign, CheckCircle, Package, Calculator, X, Plus, Minus, Tag } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import ComprobanteVenta from './ComprobanteVenta';
+import ComprobanteCierre from './ComprobanteCierre';
 import { generarLineasVenta } from './utilsVentas';
 
 // --- UTILIDADES ---
@@ -29,13 +30,17 @@ const PuntoDeVenta = ({ session }) => {
   
   const inputRef = useRef(null);
   const comprobanteRef = useRef(null);
+  const comprobanteCierreRef = useRef(null);
   const [modalCierre, setModalCierre] = useState(false);
   const [modalPago, setModalPago] = useState(false);
   const [datosParaImprimir, setDatosParaImprimir] = useState(null);
 
-  const [resumenCierre, setResumenCierre] = useState({ ventas: 0, base: 0, total: 0, desde: '' });
+  const [resumenCierre, setResumenCierre] = useState({ ventas: 0, base: 0, total: 0, desde: '', efectivo: 0, nequi: 0, bancolombia: 0, davivienda: 0 });
   const [pagoCon, setPagoCon] = useState('');
   const [metodoPago, setMetodoPago] = useState('efectivo');
+  const [ultimoCambio, setUltimoCambio] = useState(null);
+  const [datosCierreImprimir, setDatosCierreImprimir] = useState(null);
+  const [nombreCajero, setNombreCajero] = useState(session.user.email);
 
   const handlePrint = useReactToPrint({
     contentRef: comprobanteRef,
@@ -43,12 +48,33 @@ const PuntoDeVenta = ({ session }) => {
     pageStyle: '@page { size: 80mm auto; margin: 4mm; }'
   });
 
+  const handlePrintCierre = useReactToPrint({
+    contentRef: comprobanteCierreRef,
+    documentTitle: `Cierre_${new Date().toISOString().slice(0, 10)}`,
+    pageStyle: '@page { size: 80mm auto; margin: 4mm; }'
+  });
   const [combos, setCombos] = useState([]);
 
   useEffect(() => { 
     cargarProductos();
     cargarCombos();
     if(inputRef.current) inputRef.current.focus();
+    // Obtener nombre del cajero desde perfiles
+    const cargarNombreCajero = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('perfiles')
+          .select('nombre_completo')
+          .eq('id', session.user.id)
+          .single();
+        if (!error && data?.nombre_completo) {
+          setNombreCajero(data.nombre_completo);
+        }
+      } catch (err) {
+        console.error('Error obteniendo nombre del cajero:', err);
+      }
+    };
+    cargarNombreCajero();
   }, []);
 
   const cargarCombos = async () => {
@@ -197,6 +223,7 @@ const PuntoDeVenta = ({ session }) => {
 
       const cambio = dineroEntregado - totalCarrito;
       toast.success(`¡Venta Exitosa!${metodoPago === 'efectivo' ? ` Cambio: ${formatoMoneda(cambio)}` : ''}`, { duration: 4000 });
+      setUltimoCambio({ total: totalCarrito, pagoCon: dineroEntregado, cambio, metodoPago });
       const numeroVenta = venta.numero_venta ?? venta.id?.slice(-8);
       const itemsComprobante = [];
       lineasVenta.forEach((l) => {
@@ -260,24 +287,44 @@ const PuntoDeVenta = ({ session }) => {
   // --- LÓGICA DE CIERRE ---
   const calcularCierre = async () => {
     try {
-      const hoy = new Date().toISOString().split('T')[0];
+      // Delimitar el día usando la hora LOCAL del equipo y convertir a UTC para la BD
+      const ahora = new Date();
+      const inicioLocal = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 0, 0, 0, 0);
+      const finLocal = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 23, 59, 59, 999);
+      const inicioDia = inicioLocal.toISOString();
+      const finDia = finLocal.toISOString();
+
       const { data: ultimoCierre } = await supabase.from('caja_movimientos')
           .select('creado_en').eq('tipo', 'entrega_turno').eq('usuario_id', session.user.id)
-          .gte('creado_en', `${hoy}T00:00:00`).order('creado_en', { ascending: false }).limit(1).single();
+          .gte('creado_en', inicioDia).order('creado_en', { ascending: false }).limit(1).single();
 
-      const fechaInicio = ultimoCierre ? ultimoCierre.creado_en : `${hoy}T00:00:00`;
+      const fechaInicio = ultimoCierre ? ultimoCierre.creado_en : inicioDia;
 
       // Sumar VENTAS
       const { data: ventas } = await supabase.from('ventas')
-          .select('total').eq('cajero_id', session.user.id).gt('creado_en', fechaInicio).lte('creado_en', `${hoy}T23:59:59`);
+          .select('total, metodo_pago').eq('cajero_id', session.user.id).gt('creado_en', fechaInicio).lte('creado_en', finDia);
+      const totalesPorMetodo = (ventas || []).reduce((acc, v) => {
+        const m = (v.metodo_pago || 'efectivo').toLowerCase();
+        acc[m] = (acc[m] || 0) + v.total;
+        return acc;
+      }, {});
       const totalVentas = ventas?.reduce((s, v) => s + v.total, 0) || 0;
 
       // Sumar BASES
       const { data: bases } = await supabase.from('caja_movimientos')
-          .select('monto').eq('tipo', 'base').eq('beneficiario', session.user.id).gt('creado_en', fechaInicio).lte('creado_en', `${hoy}T23:59:59`);
+          .select('monto').eq('tipo', 'base').eq('beneficiario', session.user.id).gt('creado_en', fechaInicio).lte('creado_en', finDia);
       const totalBases = bases?.reduce((s, b) => s + b.monto, 0) || 0;
 
-      setResumenCierre({ ventas: totalVentas, base: totalBases, total: totalVentas + totalBases, desde: new Date(fechaInicio).toLocaleTimeString('es-CO') });
+      setResumenCierre({
+        ventas: totalVentas,
+        base: totalBases,
+        total: totalVentas + totalBases,
+        desde: new Date(fechaInicio).toLocaleTimeString('es-CO'),
+        efectivo: totalesPorMetodo.efectivo || 0,
+        nequi: totalesPorMetodo.nequi || 0,
+        bancolombia: totalesPorMetodo.bancolombia || 0,
+        davivienda: totalesPorMetodo.davivienda || 0
+      });
       setModalCierre(true);
     } catch (err) {
       console.error("Error en calcularCierre:", err);
@@ -291,7 +338,17 @@ const PuntoDeVenta = ({ session }) => {
         tipo: 'entrega_turno', descripcion: 'Cierre de Turno', monto: resumenCierre.total, usuario_id: session.user.id, estado_cierre: 'pendiente'
       }]);
       if (error) throw error;
-      toast.success("Turno Cerrado"); setModalCierre(false);
+      toast.success("Turno Cerrado");
+      // Preparar datos para comprobante de cierre
+      setDatosCierreImprimir({
+        ...resumenCierre,
+        cajeroNombre: nombreCajero,
+        fecha: new Date().toISOString()
+      });
+      setModalCierre(false);
+      setTimeout(() => {
+        handlePrintCierre();
+      }, 150);
       setTimeout(async () => { await supabase.auth.signOut(); }, 1500);
     } catch (err) {
       console.error("Error en confirmarEntrega:", err);
@@ -367,7 +424,7 @@ const PuntoDeVenta = ({ session }) => {
   const productosFiltrados = productos.filter(p => p.nombre.toLowerCase().includes(busqueda.toLowerCase()));
 
   return (
-    <div className="flex h-screen bg-gray-100 font-sans overflow-hidden">
+    <div className="flex flex-col lg:flex-row min-h-screen bg-gray-100 font-sans overflow-hidden">
       <Toaster position="top-center" />
       
       {/* IZQUIERDA: PRODUCTOS */}
@@ -393,7 +450,7 @@ const PuntoDeVenta = ({ session }) => {
       </div>
 
       {/* DERECHA: CARRITO */}
-      <div className="w-96 bg-white shadow-2xl flex flex-col border-l z-10">
+      <div className="w-full lg:w-96 bg-white shadow-2xl flex flex-col border-l z-10">
         <div className="p-5 border-b bg-gray-50 flex justify-between items-center">
           <h2 className="font-bold text-xl flex items-center gap-2"><ShoppingCart className="text-blue-600"/> Carrito</h2>
           <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded-full">{carrito.length} items</span>
@@ -427,8 +484,19 @@ const PuntoDeVenta = ({ session }) => {
           )}
         </div>
 
-        <div className="p-6 bg-gray-900 text-white">
-          <div className="flex justify-between items-center mb-6"><span className="text-gray-400">Total a Pagar</span><span className="text-3xl font-bold">{formatoMoneda(totalCarrito)}</span></div>
+        <div className="p-6 bg-gray-900 text-white space-y-4">
+          {ultimoCambio && (
+            <div className="bg-black/30 rounded-lg p-3 text-sm flex flex-col gap-1">
+              <div className="flex justify-between"><span className="text-gray-300">Última venta:</span><span className="font-bold">{formatoMoneda(ultimoCambio.total)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-300">Pagó con:</span><span className="font-bold">{formatoMoneda(ultimoCambio.pagoCon)}</span></div>
+              <div className="flex justify-between items-center mt-1">
+                <span className="text-gray-300">Cambio a devolver:</span>
+                <span className="text-2xl font-black text-green-400">{formatoMoneda(ultimoCambio.cambio)}</span>
+              </div>
+              <button onClick={() => setUltimoCambio(null)} className="mt-2 w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-bold text-xs">CONFIRMAR CAMBIO</button>
+            </div>
+          )}
+          <div className="flex justify-between items-center"><span className="text-gray-400">Total a Pagar</span><span className="text-3xl font-bold">{formatoMoneda(totalCarrito)}</span></div>
           <button onClick={abrirModalPago} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-xl font-bold text-lg shadow-lg transition-transform active:scale-95 flex justify-center items-center gap-2"><DollarSign size={24}/> COBRAR</button>
         </div>
       </div>
@@ -441,9 +509,11 @@ const PuntoDeVenta = ({ session }) => {
                 <div className="text-center mb-4"><p className="text-gray-500 text-sm">Total a Pagar</p><div className="text-4xl font-black text-blue-600">{formatoMoneda(totalCarrito)}</div></div>
                 <form onSubmit={confirmarVenta} className="space-y-4">
                     <div><label className="block text-sm font-bold text-gray-700 mb-2">Método de pago</label>
-                      <div className="flex gap-2">
-                        <button type="button" onClick={() => setMetodoPago('efectivo')} className={`flex-1 py-2 rounded-lg font-bold text-sm ${metodoPago === 'efectivo' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600'}`}>Efectivo</button>
-                        <button type="button" onClick={() => setMetodoPago('nequi')} className={`flex-1 py-2 rounded-lg font-bold text-sm ${metodoPago === 'nequi' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600'}`}>Nequi</button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button type="button" onClick={() => setMetodoPago('efectivo')} className={`py-2 rounded-lg font-bold text-xs ${metodoPago === 'efectivo' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600'}`}>Efectivo</button>
+                        <button type="button" onClick={() => setMetodoPago('nequi')} className={`py-2 rounded-lg font-bold text-xs ${metodoPago === 'nequi' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600'}`}>Nequi</button>
+                        <button type="button" onClick={() => setMetodoPago('bancolombia')} className={`py-2 rounded-lg font-bold text-xs ${metodoPago === 'bancolombia' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>Bancolombia</button>
+                        <button type="button" onClick={() => setMetodoPago('davivienda')} className={`py-2 rounded-lg font-bold text-xs ${metodoPago === 'davivienda' ? 'bg-yellow-500 text-white' : 'bg-gray-100 text-gray-600'}`}>Davivienda</button>
                       </div>
                     </div>
                     {metodoPago === 'efectivo' && (
@@ -465,6 +535,13 @@ const PuntoDeVenta = ({ session }) => {
         </div>
       </div>
 
+      {/* COMPROBANTE OCULTO PARA CIERRE */}
+      <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
+        <div ref={comprobanteCierreRef}>
+          <ComprobanteCierre datos={datosCierreImprimir} />
+        </div>
+      </div>
+
       {/* MODAL CIERRE */}
       {modalCierre && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
@@ -472,9 +549,13 @@ const PuntoDeVenta = ({ session }) => {
             <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4"><CheckCircle size={40} className="text-green-600"/></div>
             <h2 className="text-2xl font-black text-gray-800 mb-1">¡Turno Finalizado!</h2>
             <p className="text-gray-500 text-sm mb-6">Desde las: <strong>{resumenCierre.desde}</strong></p>
-            <div className="bg-gray-50 p-4 rounded-xl mb-6 border border-gray-200 space-y-2">
-                <div className="flex justify-between items-center text-gray-600 text-sm"><span>Ventas:</span><span className="font-bold text-gray-800">{formatoMoneda(resumenCierre.ventas)}</span></div>
-                <div className="flex justify-between items-center text-gray-600 text-sm"><span>Base Inicial:</span><span className="font-bold text-orange-600">+ {formatoMoneda(resumenCierre.base)}</span></div>
+            <div className="bg-gray-50 p-4 rounded-xl mb-6 border border-gray-200 space-y-2 text-sm">
+                <div className="flex justify-between items-center text-gray-600"><span>Ventas (Total):</span><span className="font-bold text-gray-800">{formatoMoneda(resumenCierre.ventas)}</span></div>
+                <div className="flex justify-between items-center text-gray-600"><span> - Efectivo:</span><span className="font-bold">{formatoMoneda(resumenCierre.efectivo || 0)}</span></div>
+                <div className="flex justify-between items-center text-gray-600"><span> - Nequi:</span><span className="font-bold">{formatoMoneda(resumenCierre.nequi || 0)}</span></div>
+                <div className="flex justify-between items-center text-gray-600"><span> - Bancolombia:</span><span className="font-bold">{formatoMoneda(resumenCierre.bancolombia || 0)}</span></div>
+                <div className="flex justify-between items-center text-gray-600"><span> - Davivienda:</span><span className="font-bold">{formatoMoneda(resumenCierre.davivienda || 0)}</span></div>
+                <div className="flex justify-between items-center text-gray-600 mt-2 border-t border-gray-200 pt-2"><span>Base Inicial:</span><span className="font-bold text-orange-600">+ {formatoMoneda(resumenCierre.base)}</span></div>
                 <div className="border-t border-gray-300 pt-2 mt-2 flex justify-between items-center text-xl font-black text-blue-600"><span>ENTREGAR:</span><span>{formatoMoneda(resumenCierre.total)}</span></div>
             </div>
             <button onClick={confirmarEntrega} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-green-700 transition-all mb-3">Confirmar y Salir</button>

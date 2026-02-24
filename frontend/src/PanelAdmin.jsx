@@ -536,6 +536,7 @@ const VistaCombos = () => {
   const [prodAgregar, setProdAgregar] = useState('');
   const [cantAgregar, setCantAgregar] = useState(1);
   const [buscarCombo, setBuscarCombo] = useState('');
+  const [buscarProductoCombo, setBuscarProductoCombo] = useState('');
 
   useEffect(() => { cargar(); cargarProductos(); }, []);
   const cargarProductos = async () => {
@@ -687,22 +688,32 @@ const VistaCombos = () => {
               <div><label className="text-xs font-bold text-gray-500">Nombre del Combo</label><input value={form.nombre} onChange={e=>setForm({...form, nombre:e.target.value})} placeholder="Ej: Combo Merienda" className="w-full border p-2 rounded" required/></div>
               <div><label className="text-xs font-bold text-gray-500">Precio del Combo</label><InputMoneda value={form.precio} onChange={v=>setForm({...form, precio:v})} placeholder="0" /></div>
               <div><label className="text-xs font-bold text-gray-500">Productos del Combo (mín. 2)</label>
-                <div className="flex gap-2 mt-1">
-                  <select
-                    key={`combo-select-${form.items.length}`}
-                    value={prodAgregar}
-                    onChange={e => setProdAgregar(e.target.value)}
-                    className="flex-1 border p-2 rounded text-sm"
-                  >
-                    <option value="">-- Selecciona otro producto --</option>
-                    {productos
-                      .filter(p => !form.items.some(i => String(i.producto_id) === String(p.id)))
-                      .map(p => (
-                        <option key={p.id} value={p.id}>{p.nombre}</option>
-                      ))}
-                  </select>
-                  <input type="number" min="1" value={cantAgregar} onChange={e=>setCantAgregar(parseInt(e.target.value)||1)} className="w-16 border p-2 rounded text-sm" />
-                  <button type="button" onClick={agregarItemAlForm} className="bg-purple-200 text-purple-800 px-4 py-2 rounded font-bold text-sm hover:bg-purple-300">+ Agregar</button>
+                <div className="flex flex-col gap-2 mt-1">
+                  <input
+                    type="text"
+                    placeholder="Buscar producto para el combo..."
+                    value={buscarProductoCombo}
+                    onChange={e => setBuscarProductoCombo(e.target.value)}
+                    className="border p-2 rounded text-xs"
+                  />
+                  <div className="flex gap-2">
+                    <select
+                      key={`combo-select-${form.items.length}`}
+                      value={prodAgregar}
+                      onChange={e => setProdAgregar(e.target.value)}
+                      className="flex-1 border p-2 rounded text-sm"
+                    >
+                      <option value="">-- Selecciona otro producto --</option>
+                      {productos
+                        .filter(p => !form.items.some(i => String(i.producto_id) === String(p.id)))
+                        .filter(p => p.nombre.toLowerCase().includes(buscarProductoCombo.toLowerCase()))
+                        .map(p => (
+                          <option key={p.id} value={p.id}>{p.nombre}</option>
+                        ))}
+                    </select>
+                    <input type="number" min="1" value={cantAgregar} onChange={e=>setCantAgregar(parseInt(e.target.value)||1)} className="w-16 border p-2 rounded text-sm" />
+                    <button type="button" onClick={agregarItemAlForm} className="bg-purple-200 text-purple-800 px-4 py-2 rounded font-bold text-sm hover:bg-purple-300">+ Agregar</button>
+                  </div>
                 </div>
                 <div className="mt-2 space-y-1">
                   {form.items.map(i=>(

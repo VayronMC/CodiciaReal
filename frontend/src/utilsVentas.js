@@ -6,18 +6,23 @@
 
 /**
  * Calcula el total de un producto aplicando precio mayoreo si corresponde.
- * Lógica modular: 6 unidades con umbral 3 = 2 grupos a precio mayoreo.
- * @param {Object} item - { cantidad, precio, precio_mayoreo?, umbral_mayoreo? }
- * @returns {number} Total calculado
+ *
+ * Nueva lógica solicitada:
+ * - Si la cantidad es menor al umbral → todo al precio normal.
+ * - Si la cantidad es mayor o igual al umbral → TODAS las unidades al precio mayoreo.
+ *
+ * Ejemplo:
+ * - precio = 3.000, precio_mayoreo = 2.800, umbral = 3
+ *   - cantidad = 2  → 2 * 3.000
+ *   - cantidad = 3  → 3 * 2.800
+ *   - cantidad = 4  → 4 * 2.800
  */
 export const calcularTotalConMayoreo = (item) => {
-  const { cantidad, precio, precio_mayoreo, umbral_mayoreo } = item;
+  const { cantidad = 0, precio = 0, precio_mayoreo, umbral_mayoreo } = item;
   if (!umbral_mayoreo || !precio_mayoreo || cantidad < umbral_mayoreo) {
-    return cantidad * (precio || 0);
+    return cantidad * precio;
   }
-  const grupos = Math.floor(cantidad / umbral_mayoreo);
-  const resto = cantidad % umbral_mayoreo;
-  return grupos * umbral_mayoreo * precio_mayoreo + resto * precio;
+  return cantidad * precio_mayoreo;
 };
 
 /**
