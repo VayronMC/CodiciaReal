@@ -424,7 +424,7 @@ const PuntoDeVenta = ({ session }) => {
   const productosFiltrados = productos.filter(p => p.nombre.toLowerCase().includes(busqueda.toLowerCase()));
 
   return (
-    <div className="flex flex-col lg:flex-row min-h-screen bg-gray-100 font-sans overflow-hidden">
+    <div className="flex flex-col md:flex-row min-h-screen bg-gray-100 font-sans overflow-hidden">
       <Toaster position="top-center" />
       
       {/* IZQUIERDA: PRODUCTOS */}
