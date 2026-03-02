@@ -287,22 +287,19 @@ const PuntoDeVenta = ({ session }) => {
   // --- LÓGICA DE CIERRE ---
   const calcularCierre = async () => {
     try {
-      // Delimitar el día usando la hora LOCAL del equipo y convertir a UTC para la BD
-      const ahora = new Date();
-      const inicioLocal = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 0, 0, 0, 0);
-      const finLocal = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 23, 59, 59, 999);
-      const inicioDia = inicioLocal.toISOString();
-      const finDia = finLocal.toISOString();
-
+      // Buscar el último cierre de caja del usuario (sin importar el día)
       const { data: ultimoCierre } = await supabase.from('caja_movimientos')
           .select('creado_en').eq('tipo', 'entrega_turno').eq('usuario_id', session.user.id)
-          .gte('creado_en', inicioDia).order('creado_en', { ascending: false }).limit(1).single();
+          .order('creado_en', { ascending: false }).limit(1).single();
 
-      const fechaInicio = ultimoCierre ? ultimoCierre.creado_en : inicioDia;
+      // Si no hay cierres previos, usar el inicio del día actual como referencia
+      // Si hay cierre previo, usar esa fecha como punto de inicio
+      const ahora = new Date();
+      const fechaInicio = ultimoCierre ? ultimoCierre.creado_en : new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 0, 0, 0, 0).toISOString();
 
-      // Sumar VENTAS
+      // Sumar VENTAS desde el último cierre
       const { data: ventas } = await supabase.from('ventas')
-          .select('total, metodo_pago').eq('cajero_id', session.user.id).gt('creado_en', fechaInicio).lte('creado_en', finDia);
+          .select('total, metodo_pago').eq('cajero_id', session.user.id).gt('creado_en', fechaInicio);
       const totalesPorMetodo = (ventas || []).reduce((acc, v) => {
         const m = (v.metodo_pago || 'efectivo').toLowerCase();
         acc[m] = (acc[m] || 0) + v.total;
@@ -310,16 +307,16 @@ const PuntoDeVenta = ({ session }) => {
       }, {});
       const totalVentas = ventas?.reduce((s, v) => s + v.total, 0) || 0;
 
-      // Sumar BASES
+      // Sumar BASES desde el último cierre
       const { data: bases } = await supabase.from('caja_movimientos')
-          .select('monto').eq('tipo', 'base').eq('beneficiario', session.user.id).gt('creado_en', fechaInicio).lte('creado_en', finDia);
+          .select('monto').eq('tipo', 'base').eq('beneficiario', session.user.id).gt('creado_en', fechaInicio);
       const totalBases = bases?.reduce((s, b) => s + b.monto, 0) || 0;
 
       setResumenCierre({
         ventas: totalVentas,
         base: totalBases,
         total: totalVentas + totalBases,
-        desde: new Date(fechaInicio).toLocaleTimeString('es-CO'),
+        desde: new Date(fechaInicio).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }),
         efectivo: totalesPorMetodo.efectivo || 0,
         nequi: totalesPorMetodo.nequi || 0,
         bancolombia: totalesPorMetodo.bancolombia || 0,
