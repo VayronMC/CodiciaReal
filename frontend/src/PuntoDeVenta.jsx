@@ -203,6 +203,11 @@ const PuntoDeVenta = ({ session }) => {
         }
       }
 
+      // 🔍 DEBUG: Verificar qué session.user.id se está usando
+      console.log('🔍 DEBUG - Session User ID:', session.user.id);
+      console.log('🔍 DEBUG - Session User Email:', session.user.email);
+      console.log('🔍 DEBUG - Session completa:', session);
+
       const { data: venta, error: errorVenta } = await supabase.from('ventas').insert([{ cajero_id: session.user.id, total: totalCarrito, metodo_pago: metodoPago }]).select().single();
       if (errorVenta) throw errorVenta;
 
@@ -313,9 +318,11 @@ const PuntoDeVenta = ({ session }) => {
       const ahora = new Date();
       const fechaInicio = ultimoCierre ? ultimoCierre.creado_en : new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 0, 0, 0, 0).toISOString();
 
-      // Sumar VENTAS desde el último cierre
+      // Sumar VENTAS desde el último cierre SOLO del usuario actual
       const { data: ventas } = await supabase.from('ventas')
-          .select('total, metodo_pago, cajero_id, creado_en').gt('creado_en', fechaInicio);
+          .select('total, metodo_pago, cajero_id, creado_en')
+          .eq('cajero_id', session.user.id)  // ← FILTRAR POR USUARIO ACTUAL
+          .gt('creado_en', fechaInicio);
       
       const totalesPorMetodo = (ventas || []).reduce((acc, v) => {
         const m = (v.metodo_pago || 'efectivo').toLowerCase();
