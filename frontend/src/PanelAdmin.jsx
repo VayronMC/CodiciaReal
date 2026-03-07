@@ -79,7 +79,7 @@ const VistaDashboard = () => {
       const histBases = movs?.filter(m=>m.tipo==='base').reduce((s,m)=>s+m.monto,0)||0;
       const histEntregas = movs?.filter(m=>m.tipo==='entrega_turno').reduce((s,m)=>s+m.monto,0)||0;
 
-      const cajaFuerte = (histCapital + histVentas + histEntregas) - (histGastos + histBases);
+      const cajaFuerte = (histCapital + histEntregas) - (histGastos + histBases);
 
       setResumen({ ventas: totalVentas, gastos, bases: 0, entregas, cajaFuerte });
     } catch (err) {

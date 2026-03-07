@@ -41,6 +41,7 @@ const PuntoDeVenta = ({ session }) => {
   const [ultimoCambio, setUltimoCambio] = useState(null);
   const [datosCierreImprimir, setDatosCierreImprimir] = useState(null);
   const [nombreCajero, setNombreCajero] = useState(session.user.email);
+  const [procesandoVenta, setProcesandoVenta] = useState(false);
 
   const handlePrint = useReactToPrint({
     contentRef: comprobanteRef,
@@ -156,11 +157,21 @@ const PuntoDeVenta = ({ session }) => {
 
   const confirmarVenta = async (e) => {
     e.preventDefault();
+    
+    // 🔒 PREVENIR DOBLE CLIC
+    if (procesandoVenta) {
+      toast.error("Procesando venta, por favor espera...");
+      return;
+    }
+    
     const dineroEntregado = metodoPago === 'efectivo' ? (parseInt(pagoCon.replace(/\./g, '')) || 0) : totalCarrito;
 
     if (metodoPago === 'efectivo' && dineroEntregado < totalCarrito) {
       return toast.error("Dinero insuficiente");
     }
+
+    // 🔒 INICIAR PROCESO DE VENTA
+    setProcesandoVenta(true);
 
     try {
       const consumoPorProducto = new Map();
@@ -186,7 +197,9 @@ const PuntoDeVenta = ({ session }) => {
         const prod = productosActuales?.find((p) => p.id === pid);
         if (!prod || qtyNecesaria > prod.stock) {
           const disponible = prod?.stock ?? 0;
-          return toast.error(`No hay stock suficiente de "${prod?.nombre || 'Producto'}". Disponible: ${disponible}`);
+          toast.error(`No hay stock suficiente de "${prod?.nombre || 'Producto'}". Disponible: ${disponible}`);
+          setProcesandoVenta(false);
+          return;
         }
       }
 
@@ -281,6 +294,9 @@ const PuntoDeVenta = ({ session }) => {
     } catch (err) {
       console.error("Error en confirmarVenta:", err);
       toast.error(`Error: ${err.message || 'Fallo al guardar'}`);
+    } finally {
+      // 🔒 FINALIZAR PROCESO DE VENTA
+      setProcesandoVenta(false);
     }
   };
 
@@ -299,7 +315,8 @@ const PuntoDeVenta = ({ session }) => {
 
       // Sumar VENTAS desde el último cierre
       const { data: ventas } = await supabase.from('ventas')
-          .select('total, metodo_pago').eq('cajero_id', session.user.id).gt('creado_en', fechaInicio);
+          .select('total, metodo_pago, cajero_id, creado_en').gt('creado_en', fechaInicio);
+      
       const totalesPorMetodo = (ventas || []).reduce((acc, v) => {
         const m = (v.metodo_pago || 'efectivo').toLowerCase();
         acc[m] = (acc[m] || 0) + v.total;
@@ -494,7 +511,26 @@ const PuntoDeVenta = ({ session }) => {
             </div>
           )}
           <div className="flex justify-between items-center"><span className="text-gray-400">Total a Pagar</span><span className="text-3xl font-bold">{formatoMoneda(totalCarrito)}</span></div>
-          <button onClick={abrirModalPago} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-xl font-bold text-lg shadow-lg transition-transform active:scale-95 flex justify-center items-center gap-2"><DollarSign size={24}/> COBRAR</button>
+          <button 
+  onClick={abrirModalPago} 
+  disabled={procesandoVenta}
+  className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg transition-all flex justify-center items-center gap-2 ${
+    procesandoVenta 
+      ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+      : 'bg-blue-600 hover:bg-blue-500 text-white active:scale-95'
+  }`}
+>
+  {procesandoVenta ? (
+    <>
+      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+      PROCESANDO...
+    </>
+  ) : (
+    <>
+      <DollarSign size={24}/> COBRAR
+    </>
+  )}
+</button>
         </div>
       </div>
 
@@ -519,7 +555,24 @@ const PuntoDeVenta = ({ session }) => {
                         <div className="bg-gray-100 p-4 rounded-xl flex justify-between items-center"><span className="font-bold text-gray-600">Cambio:</span><span className={`text-xl font-bold ${(parseInt(pagoCon.replace(/\./g, '')) || 0) < totalCarrito ? 'text-red-500' : 'text-green-600'}`}>{formatoMoneda((parseInt(pagoCon.replace(/\./g, '')) || 0) - totalCarrito)}</span></div>
                       </>
                     )}
-                    <button className="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-bold text-lg shadow-lg transition-transform active:scale-95">CONFIRMAR VENTA</button>
+                    <button 
+  type="submit"
+  disabled={procesandoVenta}
+  className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg transition-all flex items-center justify-center gap-2 ${
+    procesandoVenta 
+      ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+      : 'bg-green-600 hover:bg-green-700 text-white active:scale-95'
+  }`}
+>
+  {procesandoVenta ? (
+    <>
+      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+      PROCESANDO...
+    </>
+  ) : (
+    'CONFIRMAR VENTA'
+  )}
+</button>
                 </form>
             </div>
         </div>
