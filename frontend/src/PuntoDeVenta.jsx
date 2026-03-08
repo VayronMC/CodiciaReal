@@ -208,6 +208,18 @@ const PuntoDeVenta = ({ session }) => {
       console.log('🔍 DEBUG - Session User Email:', session.user.email);
       console.log('🔍 DEBUG - Session completa:', session);
 
+      // 🔍 DEBUG: Verificar consulta de ventas
+      console.log('🔍 DEBUG - Fecha de inicio:', fechaInicio);
+      console.log('🔍 DEBUG - Filtrando por cajero_id:', session.user.id);
+
+      const { data: ventas, error: errorVentas } = await supabase.from('ventas')
+          .select('total, metodo_pago, cajero_id, creado_en')
+          .eq('cajero_id', session.user.id)  // ← FILTRAR POR USUARIO ACTUAL
+          .gt('creado_en', fechaInicio);
+      
+      console.log('🔍 DEBUG - Ventas encontradas:', ventas);
+      console.log('🔍 DEBUG - Error ventas:', errorVentas);
+
       const { data: venta, error: errorVenta } = await supabase.from('ventas').insert([{ cajero_id: session.user.id, total: totalCarrito, metodo_pago: metodoPago }]).select().single();
       if (errorVenta) throw errorVenta;
 
