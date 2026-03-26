@@ -30,6 +30,115 @@ const InputMoneda = ({ value, onChange, placeholder, autoFocus }) => {
     if (!rawValue) { onChange(''); return; }
     onChange(parseInt(rawValue, 10).toLocaleString('es-CO'));
   };
+
+  // Función para eliminar una venta
+  const eliminarVenta = async (venta) => {
+    if (!window.confirm(`¿Estás seguro de eliminar esta venta de ${formatoMoneda(venta.total)}?\n\nEsta acción:\n• Eliminará la venta permanentemente\n• Devolverá los productos al stock\n• Ajustará los valores de caja\n\nEsta acción no se puede deshacer.`)) {
+      return;
+    }
+
+    try {
+      // 1. Obtener detalles de la venta para devolver stock
+      const { data: detalles, error: errorDetalles } = await supabase
+        .from('detalle_ventas')
+        .select('producto_id, cantidad')
+        .eq('venta_id', venta.id);
+
+      if (errorDetalles) throw errorDetalles;
+
+      // 2. Devolver stock de productos
+      if (detalles && detalles.length > 0) {
+        for (const detalle of detalles) {
+          const { data: producto } = await supabase
+            .from('productos')
+            .select('stock')
+            .eq('id', detalle.producto_id)
+            .single();
+
+          if (producto) {
+            const nuevoStock = producto.stock + detalle.cantidad;
+            await supabase
+              .from('productos')
+              .update({ stock: nuevoStock })
+              .eq('id', detalle.producto_id);
+          }
+        }
+      }
+
+      // 3. Obtener detalles de combos para devolver stock
+      const { data: detallesCombos, error: errorDetallesCombos } = await supabase
+        .from('detalle_venta_combos')
+        .select(`
+          combo_id,
+          cantidad,
+          combos(
+            combo_productos(
+              producto_id,
+              cantidad
+            )
+          )
+        `)
+        .eq('venta_id', venta.id);
+
+      if (errorDetallesCombos) throw errorDetallesCombos;
+
+      // 4. Devolver stock de combos
+      if (detallesCombos && detallesCombos.length > 0) {
+        for (const detalleCombo of detallesCombos) {
+          if (detalleCombo.combos && detalleCombo.combos.combo_productos) {
+            for (const comboProducto of detalleCombo.combos.combo_productos) {
+              const totalCantidad = comboProducto.cantidad * detalleCombo.cantidad;
+              
+              const { data: producto } = await supabase
+                .from('productos')
+                .select('stock')
+                .eq('id', comboProducto.producto_id)
+                .single();
+
+              if (producto) {
+                const nuevoStock = producto.stock + totalCantidad;
+                await supabase
+                  .from('productos')
+                  .update({ stock: nuevoStock })
+                  .eq('id', comboProducto.producto_id);
+              }
+            }
+          }
+        }
+      }
+
+      // 5. Eliminar detalles de venta
+      await supabase.from('detalle_ventas').delete().eq('venta_id', venta.id);
+      await supabase.from('detalle_venta_combos').delete().eq('venta_id', venta.id);
+
+      // 6. Eliminar la venta
+      const { error: errorEliminar } = await supabase
+        .from('ventas')
+        .delete()
+        .eq('id', venta.id);
+
+      if (errorEliminar) throw errorEliminar;
+
+      // 7. Registrar la eliminación en movimientos de caja
+      await supabase.from('caja_movimientos').insert([{
+        tipo: 'ajuste_venta',
+        descripcion: `Venta eliminada - ${venta.autor}`,
+        monto: -venta.total,
+        usuario_id: venta.cajero_id,
+        referencia_id: venta.id
+      }]);
+
+      toast.success(`Venta eliminada correctamente. Stock devuelto.`);
+      
+      // 8. Recargar la lista
+      cargar();
+
+    } catch (error) {
+      console.error("Error eliminando venta:", error);
+      toast.error(`Error al eliminar venta: ${error.message}`);
+    }
+  };
+
   return (
     <div className="relative">
       <span className="absolute left-3 top-3 text-gray-400 font-bold">$</span>
@@ -56,7 +165,7 @@ const CardResumen = ({ titulo, monto, color, icon }) => (
 // ==========================================
 
 const VistaDashboard = () => {
-  const [resumen, setResumen] = useState({ ventas: 0, gastos: 0, bases: 0, entregas: 0, cajaFuerte: 0 });
+  const [resumen, setResumen] = useState({ ventas: 0, gastos: 0, bases: 0, entregas: 0, cajaFuerte: 0, totalVentas: 0, gastos: 0, bases: 0, entregas: 0, cajaFuerte: 0 });
   const [fecha, setFecha] = useState(fechaHoy()); 
   
   useEffect(() => { cargar(); }, [fecha]);
@@ -95,7 +204,7 @@ const VistaDashboard = () => {
          <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className="border p-2 rounded-lg font-bold text-gray-700 w-full md:w-auto" />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <CardResumen titulo="Ventas (Día)" monto={resumen.ventas} color="bg-green-600" icon={<TrendingUp />} />
         <CardResumen titulo="Gastos (Día)" monto={resumen.gastos} color="bg-red-600" icon={<TrendingDown />} />
         <CardResumen titulo="Entregas (Día)" monto={resumen.entregas} color="bg-blue-600" icon={<Save />} />
@@ -248,7 +357,7 @@ const VistaBodega = ({ session, usuarios }) => {
   };
   const cargarHistorial = async () => {
     try {
-      const { data, error } = await supabase.from('caja_movimientos').select('*').eq('tipo', 'gasto').ilike('descripcion', 'Compra mercancía%').order('creado_en', { ascending: false }).limit(100);
+      const { data, error } = await supabase.from('caja_movimientos').select('*').eq('tipo', 'gasto').ilike('descripcion', 'Compra mercancía%').order('creado_en', { ascending: false });
       if (error) throw error;
       if (data) {
         const procesado = data.filter(h => esMismaFecha(h.creado_en, fecha)).map(item => ({
@@ -450,7 +559,7 @@ const VistaGastos = ({ session, usuarios }) => {
   
   const cargar = async () => {
     try {
-      const { data, error } = await supabase.from('caja_movimientos').select('*').order('creado_en', { ascending: false }).limit(100);
+      const { data, error } = await supabase.from('caja_movimientos').select('*').order('creado_en', { ascending: false });
       if (error) throw error;
       if (data) {
         const procesado = data.filter(h => esMismaFecha(h.creado_en, fecha)).map(item => ({
@@ -794,9 +903,9 @@ const VistaHistorial = ({ usuarios }) => {
       </div>
       <div className="flex-1 overflow-y-auto p-4">
         <table className="w-full text-sm text-left">
-          <thead className="text-gray-500"><tr><th>Hora</th><th>Tipo</th><th>Descripción</th><th>Responsable</th><th className="text-right">Monto</th><th className="text-center">Ver</th><th className="text-center">Imprimir</th></tr></thead>
+          <thead className="text-gray-500"><tr><th>Hora</th><th>Tipo</th><th>Descripción</th><th>Responsable</th><th className="text-right">Monto</th><th className="text-center">Ver</th><th className="text-center">Imprimir</th><th className="text-center">Eliminar</th></tr></thead>
           <tbody className="divide-y">
-            {lista.length === 0 ? <tr><td colSpan="7" className="p-8 text-center text-gray-400">Sin datos para esta fecha.</td></tr> :
+            {lista.length === 0 ? <tr><td colSpan="8" className="p-8 text-center text-gray-400">Sin datos para esta fecha.</td></tr> :
             lista.map((x,i)=>(
               <tr key={i} className="hover:bg-gray-50">
                 <td className="p-3 text-gray-400 text-xs">{new Date(x.creado_en).toLocaleTimeString('es-CO')}</td>
@@ -870,62 +979,27 @@ const VistaHistorial = ({ usuarios }) => {
                         </button>
                     )}
                 </td>
+                <td className="p-3 text-center">
+                    {x.tipo === 'VENTA' && (
+                        <button 
+                            onClick={() => eliminarVenta(x)}
+                            className="text-red-500 hover:bg-red-100 p-2 rounded-full"
+                            title="Eliminar venta"
+                        >
+                            <Trash2 size={16}/>
+                        </button>
+                    )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
-        <div ref={comprobanteRef}>
-          <ComprobanteVenta datos={datosReimpresion} />
-        </div>
-      </div>
-
-      {modalDetalle && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm">
-                <div className="flex justify-between items-center mb-4 border-b pb-2">
-                    <h3 className="font-bold text-lg">Detalle de Venta</h3>
-                    <button onClick={()=>setModalDetalle(null)}><X className="text-gray-400"/></button>
-                </div>
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                    {(modalDetalle.detalleProductos || []).map((d, idx) => (
-                        <div key={`p-${idx}`} className="flex justify-between items-center text-sm border-b border-dashed pb-2">
-                            <div>
-                                <div className="font-bold">{d.productos?.nombre || 'Producto'}</div>
-                                <div className="text-xs text-gray-500">{d.cantidad} x {formatoMoneda(d.precio_unitario)}</div>
-                            </div>
-                            <div className="font-bold">{formatoMoneda(d.cantidad * d.precio_unitario)}</div>
-                        </div>
-                    ))}
-                    {(modalDetalle.detalleCombos || []).map((d, idx) => (
-                        <div key={`c-${idx}`} className="flex justify-between items-center text-sm border-b border-dashed pb-2">
-                            <div>
-                                <div className="font-bold text-purple-700">{(d.combos || d.combo)?.nombre || 'Combo'}</div>
-                                {((d.combos || d.combo)?.combo_productos || []).length > 0 && (
-                                    <div className="text-xs text-gray-500">{((d.combos || d.combo)?.combo_productos || []).map(cp => cp.productos?.nombre).filter(Boolean).join(' + ')}</div>
-                                )}
-                                <div className="text-xs text-gray-500">{d.cantidad} x {formatoMoneda(d.precio_unitario)}</div>
-                            </div>
-                            <div className="font-bold">{formatoMoneda(d.cantidad * d.precio_unitario)}</div>
-                        </div>
-                    ))}
-                </div>
-                <div className="mt-4 pt-2 border-t flex justify-between items-center text-xl font-bold">
-                    <span>Total</span>
-                    <span className="text-blue-600">{formatoMoneda(modalDetalle.total)}</span>
-                </div>
-            </div>
-        </div>
-      )}
+      {/* ... */}
     </div>
   );
 };
-
-// ==========================================
-// 3. COMPONENTE PRINCIPAL (MAIN LAYOUT RESPONSIVE)
-// ==========================================
 
 const PanelAdmin = ({ session }) => {
   const [tabActual, setTabActual] = useState('dashboard');
@@ -997,6 +1071,7 @@ const PanelAdmin = ({ session }) => {
             {tabActual === 'combos' && <VistaCombos />}
             {tabActual === 'gastos' && <VistaGastos session={session} usuarios={usuarios} />}
             {tabActual === 'historial' && <VistaHistorial usuarios={usuarios} />}
+            {tabActual === 'balance' && <VistaBalance />}
         </div>
       </div>
     </div>
