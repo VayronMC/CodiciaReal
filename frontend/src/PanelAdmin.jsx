@@ -4,6 +4,7 @@ import { supabase } from './supabaseClient';
 import { LayoutDashboard, Package, DollarSign, Calendar, TrendingUp, TrendingDown, Save, Search, Truck, User, Clock, FileText, Plus, X, Edit, Trash2, CheckCircle, AlertTriangle, ShieldCheck, Barcode, Eye, EyeOff, Menu, Printer, Tag } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import ComprobanteVenta from './ComprobanteVenta';
+import { configNegocio } from './configNegocio';
 
 // ==========================================
 // 1. UTILIDADES Y FECHAS
@@ -21,7 +22,10 @@ const fechaHoy = () => {
 
 const esMismaFecha = (fechaISO, fechaFiltro) => {
   if (!fechaISO) return false;
-  return new Date(fechaISO).toLocaleDateString('fr-CA') === fechaFiltro;
+  const fecha = new Date(fechaISO);
+  const fechaInicio = new Date(fechaFiltro + 'T00:00:00');
+  const fechaFin = new Date(fechaFiltro + 'T23:59:59');
+  return fecha >= fechaInicio && fecha <= fechaFin;
 };
 
 const InputMoneda = ({ value, onChange, placeholder, autoFocus }) => {
@@ -165,15 +169,15 @@ const CardResumen = ({ titulo, monto, color, icon }) => (
 // ==========================================
 
 const VistaDashboard = () => {
-  const [resumen, setResumen] = useState({ ventas: 0, gastos: 0, bases: 0, entregas: 0, cajaFuerte: 0, totalVentas: 0, gastos: 0, bases: 0, entregas: 0, cajaFuerte: 0 });
+  const [resumen, setResumen] = useState({ ventas: 0, gastos: 0, bases: 0, entregas: 0, cajaFuerte: 0, totalVentas: 0 });
   const [fecha, setFecha] = useState(fechaHoy()); 
   
   useEffect(() => { cargar(); }, [fecha]);
   
   const cargar = async () => {
     try {
-      const { data: ventas } = await supabase.from('ventas').select('total, creado_en').limit(500);
-      const { data: movs } = await supabase.from('caja_movimientos').select('*').limit(500);
+      const { data: ventas } = await supabase.from('ventas').select('total, creado_en').order('creado_en', { ascending: false }).limit(100000);
+      const { data: movs } = await supabase.from('caja_movimientos').select('*').order('creado_en', { ascending: false }).limit(100000);
 
       const ventasHoy = ventas?.filter(v => esMismaFecha(v.creado_en, fecha)) || [];
       const movsHoy = movs?.filter(m => esMismaFecha(m.creado_en, fecha)) || [];
@@ -184,11 +188,12 @@ const VistaDashboard = () => {
 
       const histVentas = ventas?.reduce((s,v)=>s+v.total,0)||0;
       const histCapital = movs?.filter(m=>m.tipo==='ingreso_capital').reduce((s,m)=>s+m.monto,0)||0;
-      const histGastos = movs?.filter(m=>['gasto','nomina'].includes(m.tipo)).reduce((s,m)=>s+m.monto,0)||0;
-      const histBases = movs?.filter(m=>m.tipo==='base').reduce((s,m)=>s+m.monto,0)||0;
+      const histGastos = movs?.filter(m=>m.tipo==='gasto').reduce((s,m)=>s+m.monto,0)||0;
+      const histNomina = movs?.filter(m=>m.tipo==='nomina').reduce((s,m)=>s+m.monto,0)||0;
       const histEntregas = movs?.filter(m=>m.tipo==='entrega_turno').reduce((s,m)=>s+m.monto,0)||0;
+      const histBases = movs?.filter(m=>m.tipo==='base').reduce((s,m)=>s+m.monto,0)||0;
 
-      const cajaFuerte = (histCapital + histEntregas) - (histGastos + histBases);
+      const cajaFuerte = (histCapital + histEntregas) - (histGastos + histBases + histNomina);
 
       setResumen({ ventas: totalVentas, gastos, bases: 0, entregas, cajaFuerte });
     } catch (err) {
@@ -230,8 +235,7 @@ const VistaCierres = ({ session, usuarios }) => {
       const { data: todos } = await supabase.from('caja_movimientos')
         .select('*')
         .eq('tipo', 'entrega_turno')
-        .order('creado_en', { ascending: false })
-        .limit(50);
+        .order('creado_en', { ascending: false });
 
       if (!todos) return;
 
@@ -996,7 +1000,136 @@ const VistaHistorial = ({ usuarios }) => {
         </table>
       </div>
 
-      {/* ... */}
+      {/* MODAL DE DETALLES DE VENTA */}
+      {modalDetalle && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden">
+            <div className="p-6 border-b bg-gray-50">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold text-gray-800">Detalles de Venta</h3>
+                <button 
+                  onClick={() => setModalDetalle(null)}
+                  className="text-gray-400 hover:text-gray-600 p-1"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="mt-2 text-sm text-gray-600">
+                <p><strong>Venta #{modalDetalle.numero_venta || modalDetalle.id?.slice(-8)}</strong></p>
+                <p>Fecha: {new Date(modalDetalle.creado_en).toLocaleString('es-CO')}</p>
+                <p>Cajero: {modalDetalle.autor}</p>
+                <p>Método pago: {modalDetalle.metodo_pago || 'efectivo'}</p>
+              </div>
+            </div>
+            
+            <div className="p-6 overflow-y-auto max-h-[50vh]">
+              <div className="space-y-4">
+                {/* PRODUCTOS */}
+                {modalDetalle.detalleProductos && modalDetalle.detalleProductos.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold text-gray-700 mb-2">📦 Productos</h4>
+                    <div className="space-y-2">
+                      {modalDetalle.detalleProductos.map((producto, idx) => (
+                        <div key={idx} className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                          <div>
+                            <span className="font-medium">{producto.productos?.nombre || 'Producto'}</span>
+                            <span className="text-gray-500 text-sm ml-2">x{producto.cantidad}</span>
+                          </div>
+                          <span className="font-bold">{formatoMoneda(producto.precio_unitario * producto.cantidad)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* COMBOS */}
+                {modalDetalle.detalleCombos && modalDetalle.detalleCombos.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold text-gray-700 mb-2">🎁 Combos</h4>
+                    <div className="space-y-3">
+                      {modalDetalle.detalleCombos.map((combo, idx) => (
+                        <div key={idx} className="bg-blue-50 rounded p-3">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="font-medium text-blue-800">{combo.combos?.nombre || 'Combo'}</span>
+                            <span className="font-bold text-blue-600">x{combo.cantidad}</span>
+                          </div>
+                          {combo.combos?.combo_productos && combo.combos.combo_productos.length > 0 && (
+                            <div className="text-sm text-gray-600 ml-4">
+                              {combo.combos.combo_productos.map((cp, cpIdx) => (
+                                <div key={cpIdx}>
+                                  • {cp.productos?.nombre || 'Producto'} x{cp.cantidad || 1}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div className="text-right mt-2">
+                            <span className="font-bold">{formatoMoneda(combo.precio_unitario * combo.cantidad)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* TOTAL */}
+              <div className="mt-6 pt-4 border-t">
+                <div className="flex justify-between items-center">
+                  <span className="text-lg font-bold text-gray-800">TOTAL:</span>
+                  <span className="text-2xl font-bold text-green-600">{formatoMoneda(modalDetalle.total)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE REIMPRESIÓN */}
+      {datosReimpresion && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+            <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+              <h3 className="text-lg font-bold text-gray-800">Reimprimir Comprobante</h3>
+              <button 
+                onClick={() => setDatosReimpresion(null)}
+                className="text-gray-400 hover:text-gray-600 p-1"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-4">
+              <div className="text-center mb-4">
+                <p className="text-sm text-gray-600">Venta #{datosReimpresion.numeroVenta}</p>
+                <p className="text-lg font-bold">{formatoMoneda(datosReimpresion.total)}</p>
+              </div>
+              
+              <button
+                onClick={() => {
+                  toast.success('Imprimiendo comprobante...');
+                  setTimeout(() => handlePrint(), 150);
+                }}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2"
+              >
+                <Printer size={16} />
+                IMPRIMIR COMPROBANTE
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* COMPROBANTE OCULTO PARA IMPRESIÓN */}
+      <div style={{ display: 'none' }}>
+        {datosReimpresion && (
+          <div ref={comprobanteRef}>
+            <ComprobanteVenta 
+              datos={datosReimpresion}
+              configNegocio={configNegocio}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -1071,7 +1204,6 @@ const PanelAdmin = ({ session }) => {
             {tabActual === 'combos' && <VistaCombos />}
             {tabActual === 'gastos' && <VistaGastos session={session} usuarios={usuarios} />}
             {tabActual === 'historial' && <VistaHistorial usuarios={usuarios} />}
-            {tabActual === 'balance' && <VistaBalance />}
         </div>
       </div>
     </div>

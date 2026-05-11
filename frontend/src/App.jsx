@@ -88,7 +88,7 @@ function App() {
                 onClick={() => setVistaActual('admin')}
                 className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${vistaActual === 'admin' ? 'bg-orange-600 text-white shadow' : 'text-gray-400 hover:text-white'}`}
               >
-                ⚙️ ADMINISTRACIÓN
+                ADMINISTRACIÓN
               </button>
             )}
           </div>
@@ -111,7 +111,7 @@ function App() {
           <PuntoDeVenta session={session} />
         ) : (
           /* SI ES ADMIN, MOSTRAMOS EL PANEL NUEVO */
-          rolUsuario === 'admin' ? <PanelAdmin session={session} /> : <div className="p-10 text-center text-red-500 font-bold">⛔ Acceso Denegado</div>
+          rolUsuario === 'admin' ? <PanelAdmin session={session} /> : <div className="p-10 text-center text-red-500 font-bold">Acceso Denegado</div>
         )}
       </main>
 
