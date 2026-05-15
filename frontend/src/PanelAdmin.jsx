@@ -35,120 +35,120 @@ const InputMoneda = ({ value, onChange, placeholder, autoFocus }) => {
     onChange(parseInt(rawValue, 10).toLocaleString('es-CO'));
   };
 
-  // Función para eliminar una venta
-  const eliminarVenta = async (venta) => {
-    if (!window.confirm(`¿Estás seguro de eliminar esta venta de ${formatoMoneda(venta.total)}?\n\nEsta acción:\n• Eliminará la venta permanentemente\n• Devolverá los productos al stock\n• Ajustará los valores de caja\n\nEsta acción no se puede deshacer.`)) {
-      return;
-    }
-
-    try {
-      // 1. Obtener detalles de la venta para devolver stock
-      const { data: detalles, error: errorDetalles } = await supabase
-        .from('detalle_ventas')
-        .select('producto_id, cantidad')
-        .eq('venta_id', venta.id);
-
-      if (errorDetalles) throw errorDetalles;
-
-      // 2. Devolver stock de productos
-      if (detalles && detalles.length > 0) {
-        for (const detalle of detalles) {
-          const { data: producto } = await supabase
-            .from('productos')
-            .select('stock')
-            .eq('id', detalle.producto_id)
-            .single();
-
-          if (producto) {
-            const nuevoStock = producto.stock + detalle.cantidad;
-            await supabase
-              .from('productos')
-              .update({ stock: nuevoStock })
-              .eq('id', detalle.producto_id);
-          }
-        }
-      }
-
-      // 3. Obtener detalles de combos para devolver stock
-      const { data: detallesCombos, error: errorDetallesCombos } = await supabase
-        .from('detalle_venta_combos')
-        .select(`
-          combo_id,
-          cantidad,
-          combos(
-            combo_productos(
-              producto_id,
-              cantidad
-            )
-          )
-        `)
-        .eq('venta_id', venta.id);
-
-      if (errorDetallesCombos) throw errorDetallesCombos;
-
-      // 4. Devolver stock de combos
-      if (detallesCombos && detallesCombos.length > 0) {
-        for (const detalleCombo of detallesCombos) {
-          if (detalleCombo.combos && detalleCombo.combos.combo_productos) {
-            for (const comboProducto of detalleCombo.combos.combo_productos) {
-              const totalCantidad = comboProducto.cantidad * detalleCombo.cantidad;
-              
-              const { data: producto } = await supabase
-                .from('productos')
-                .select('stock')
-                .eq('id', comboProducto.producto_id)
-                .single();
-
-              if (producto) {
-                const nuevoStock = producto.stock + totalCantidad;
-                await supabase
-                  .from('productos')
-                  .update({ stock: nuevoStock })
-                  .eq('id', comboProducto.producto_id);
-              }
-            }
-          }
-        }
-      }
-
-      // 5. Eliminar detalles de venta
-      await supabase.from('detalle_ventas').delete().eq('venta_id', venta.id);
-      await supabase.from('detalle_venta_combos').delete().eq('venta_id', venta.id);
-
-      // 6. Eliminar la venta
-      const { error: errorEliminar } = await supabase
-        .from('ventas')
-        .delete()
-        .eq('id', venta.id);
-
-      if (errorEliminar) throw errorEliminar;
-
-      // 7. Registrar la eliminación en movimientos de caja
-      await supabase.from('caja_movimientos').insert([{
-        tipo: 'ajuste_venta',
-        descripcion: `Venta eliminada - ${venta.autor}`,
-        monto: -venta.total,
-        usuario_id: venta.cajero_id,
-        referencia_id: venta.id
-      }]);
-
-      toast.success(`Venta eliminada correctamente. Stock devuelto.`);
-      
-      // 8. Recargar la lista
-      cargar();
-
-    } catch (error) {
-      console.error("Error eliminando venta:", error);
-      toast.error(`Error al eliminar venta: ${error.message}`);
-    }
-  };
-
   return (
     <div className="relative">
       <span className="absolute left-3 top-3 text-gray-400 font-bold">$</span>
       <input type="text" value={value} onChange={handleChange} placeholder={placeholder || "0"} autoFocus={autoFocus} className="w-full border p-3 pl-8 rounded-lg font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500"/>
     </div>
   );
+};
+
+// Función para eliminar una venta
+const eliminarVenta = async (venta, cargar) => {
+  if (!window.confirm(`¿Estás seguro de eliminar esta venta de ${formatoMoneda(venta.total)}?\n\nEsta acción:\n• Eliminará la venta permanentemente\n• Devolverá los productos al stock\n• Ajustará los valores de caja\n\nEsta acción no se puede deshacer.`)) {
+    return;
+  }
+
+  try {
+    // 1. Obtener detalles de la venta para devolver stock
+    const { data: detalles, error: errorDetalles } = await supabase
+      .from('detalle_ventas')
+      .select('producto_id, cantidad')
+      .eq('venta_id', venta.id);
+
+    if (errorDetalles) throw errorDetalles;
+
+    // 2. Devolver stock de productos
+    if (detalles && detalles.length > 0) {
+      for (const detalle of detalles) {
+        const { data: producto } = await supabase
+          .from('productos')
+          .select('stock')
+          .eq('id', detalle.producto_id)
+          .single();
+
+        if (producto) {
+          const nuevoStock = producto.stock + detalle.cantidad;
+          await supabase
+            .from('productos')
+            .update({ stock: nuevoStock })
+            .eq('id', detalle.producto_id);
+        }
+      }
+    }
+
+    // 3. Obtener detalles de combos para devolver stock
+    const { data: detallesCombos, error: errorDetallesCombos } = await supabase
+      .from('detalle_venta_combos')
+      .select(`
+        combo_id,
+        cantidad,
+        combos(
+          combo_productos(
+            producto_id,
+            cantidad
+          )
+        )
+      `)
+      .eq('venta_id', venta.id);
+
+    if (errorDetallesCombos) throw errorDetallesCombos;
+
+    // 4. Devolver stock de combos
+    if (detallesCombos && detallesCombos.length > 0) {
+      for (const detalleCombo of detallesCombos) {
+        if (detalleCombo.combos && detalleCombo.combos.combo_productos) {
+          for (const comboProducto of detalleCombo.combos.combo_productos) {
+            const totalCantidad = comboProducto.cantidad * detalleCombo.cantidad;
+
+            const { data: producto } = await supabase
+              .from('productos')
+              .select('stock')
+              .eq('id', comboProducto.producto_id)
+              .single();
+
+            if (producto) {
+              const nuevoStock = producto.stock + totalCantidad;
+              await supabase
+                .from('productos')
+                .update({ stock: nuevoStock })
+                .eq('id', comboProducto.producto_id);
+            }
+          }
+        }
+      }
+    }
+
+    // 5. Eliminar detalles de venta
+    await supabase.from('detalle_ventas').delete().eq('venta_id', venta.id);
+    await supabase.from('detalle_venta_combos').delete().eq('venta_id', venta.id);
+
+    // 6. Eliminar la venta
+    const { error: errorEliminar } = await supabase
+      .from('ventas')
+      .delete()
+      .eq('id', venta.id);
+
+    if (errorEliminar) throw errorEliminar;
+
+    // 7. Registrar la eliminación en movimientos de caja
+    await supabase.from('caja_movimientos').insert([{
+      tipo: 'ajuste_venta',
+      descripcion: `Venta eliminada - ${venta.autor}`,
+      monto: -venta.total,
+      usuario_id: venta.cajero_id,
+      referencia_id: venta.id
+    }]);
+
+    toast.success(`Venta eliminada correctamente. Stock devuelto.`);
+
+    // 8. Recargar la lista
+    if (cargar) cargar();
+
+  } catch (error) {
+    console.error("Error eliminando venta:", error);
+    toast.error(`Error al eliminar venta: ${error.message}`);
+  }
 };
 
 const BotonMenu = ({ icon, label, active, onClick }) => (
@@ -170,10 +170,8 @@ const CardResumen = ({ titulo, monto, color, icon }) => (
 
 const VistaDashboard = () => {
   const [resumen, setResumen] = useState({ ventas: 0, gastos: 0, bases: 0, entregas: 0, cajaFuerte: 0, totalVentas: 0 });
-  const [fecha, setFecha] = useState(fechaHoy()); 
-  
-  useEffect(() => { cargar(); }, [fecha]);
-  
+  const [fecha, setFecha] = useState(fechaHoy());
+
   const cargar = async () => {
     try {
       const { data: ventas } = await supabase.from('ventas').select('total, creado_en').order('creado_en', { ascending: false }).limit(100000);
@@ -186,7 +184,6 @@ const VistaDashboard = () => {
       const gastos = movsHoy.filter(m => ['gasto', 'nomina'].includes(m.tipo)).reduce((s, m) => s + m.monto, 0);
       const entregas = movsHoy.filter(m => m.tipo === 'entrega_turno').reduce((s, m) => s + m.monto, 0);
 
-      const histVentas = ventas?.reduce((s,v)=>s+v.total,0)||0;
       const histCapital = movs?.filter(m=>m.tipo==='ingreso_capital').reduce((s,m)=>s+m.monto,0)||0;
       const histGastos = movs?.filter(m=>m.tipo==='gasto').reduce((s,m)=>s+m.monto,0)||0;
       const histNomina = movs?.filter(m=>m.tipo==='nomina').reduce((s,m)=>s+m.monto,0)||0;
@@ -201,6 +198,9 @@ const VistaDashboard = () => {
       toast.error("No se pudo cargar el resumen");
     }
   };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { cargar(); }, [fecha]);
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -228,6 +228,7 @@ const VistaCierres = ({ session, usuarios }) => {
   const [dineroRealInput, setDineroRealInput] = useState('');
   const [fecha, setFecha] = useState(fechaHoy());
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { cargar(); }, [fecha, usuarios]);
 
   const cargar = async () => {
@@ -289,8 +290,8 @@ const VistaCierres = ({ session, usuarios }) => {
             <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className="border p-2 rounded-lg font-bold w-full md:w-auto" />
         </div>
 
-        <div className="bg-white rounded-xl shadow overflow-hidden flex-1 overflow-y-auto">
-            <table className="w-full text-left text-sm">
+        <div className="bg-white rounded-xl shadow overflow-hidden flex-1 overflow-x-auto">
+            <table className="w-full text-left text-sm min-w-[600px]">
                 <thead className="bg-gray-50 border-b">
                     <tr><th className="p-4">Hora</th><th className="p-4">Empleado</th><th className="p-4 text-right">Reportado</th><th className="p-4 text-right hidden md:table-cell">Real</th><th className="p-4 text-right">Diferencia</th><th className="p-4 text-center">Estado</th></tr>
                 </thead>
@@ -347,6 +348,7 @@ const VistaBodega = ({ session, usuarios }) => {
   const [prodForm, setProdForm] = useState({ codigo:'', nombre:'', precio:'', stock:'', precio_mayoreo:'', umbral_mayoreo:'' });
   const [formCant, setFormCant] = useState(''); const [formCosto, setFormCosto] = useState('');
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { cargar(); cargarHistorial(); }, [fecha, usuarios]);
   
   const cargar = async () => {
@@ -559,6 +561,7 @@ const VistaGastos = ({ session, usuarios }) => {
   const [historial, setHistorial] = useState([]);
   const [fecha, setFecha] = useState(fechaHoy());
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { cargar(); }, [fecha, usuarios]); 
   
   const cargar = async () => {
@@ -860,8 +863,9 @@ const VistaHistorial = ({ usuarios }) => {
     contentRef: comprobanteRef,
     documentTitle: `Comprobante_Reimpresion_${new Date().toISOString().slice(0, 10)}`,
     pageStyle: '@page { size: 80mm auto; margin: 4mm; }'
-  }); 
+  });
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { cargar(); }, [fecha, usuarios]);
   
   const cargar = async () => {
@@ -985,8 +989,8 @@ const VistaHistorial = ({ usuarios }) => {
                 </td>
                 <td className="p-3 text-center">
                     {x.tipo === 'VENTA' && (
-                        <button 
-                            onClick={() => eliminarVenta(x)}
+                        <button
+                            onClick={() => eliminarVenta(x, cargar)}
                             className="text-red-500 hover:bg-red-100 p-2 rounded-full"
                             title="Eliminar venta"
                         >
@@ -1134,10 +1138,12 @@ const VistaHistorial = ({ usuarios }) => {
   );
 };
 
-const PanelAdmin = ({ session }) => {
+const PanelAdmin = ({ session, menuAbierto: menuAbiertoProp, setMenuAbierto: setMenuAbiertoProp }) => {
   const [tabActual, setTabActual] = useState('dashboard');
   const [usuarios, setUsuarios] = useState([]);
-  const [menuAbierto, setMenuAbierto] = useState(false); // Estado para menú móvil
+  const [menuAbiertoLocal, setMenuAbiertoLocal] = useState(false);
+  const menuAbierto = menuAbiertoProp !== undefined ? menuAbiertoProp : menuAbiertoLocal;
+  const setMenuAbierto = setMenuAbiertoProp !== undefined ? setMenuAbiertoProp : setMenuAbiertoLocal;
 
   useEffect(() => { cargarUsuarios(); }, []);
   const cargarUsuarios = async () => {
@@ -1158,26 +1164,20 @@ const PanelAdmin = ({ session }) => {
   return (
     <div className="flex h-screen bg-gray-100 font-sans text-gray-800 overflow-hidden">
       <Toaster position="bottom-right" />
-      
-      {/* BOTÓN HAMBURGUESA (SOLO MÓVIL) */}
-      <div className="lg:hidden fixed top-0 left-0 w-full bg-gray-900 text-white p-4 flex justify-between items-center z-40 shadow-md">
-          <span className="font-bold text-orange-500">ADMINISTRACIÓN</span>
-          <button onClick={() => setMenuAbierto(!menuAbierto)}><Menu /></button>
-      </div>
 
       {/* OVERLAY OSCURO (CUANDO EL MENÚ ESTÁ ABIERTO EN MÓVIL) */}
       {menuAbierto && (
-          <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setMenuAbierto(false)}></div>
+          <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setMenuAbierto(false)}></div>
       )}
 
       {/* SIDEBAR (MENÚ LATERAL) */}
       <div className={`
-          fixed lg:static inset-y-0 left-0 w-64 bg-gray-900 text-white flex flex-col p-4 shadow-xl z-50 transform transition-transform duration-300 ease-in-out
-          ${menuAbierto ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          fixed md:static inset-y-0 left-0 w-64 bg-gray-900 text-white flex flex-col p-4 shadow-xl z-50 transform transition-transform duration-300 ease-in-out
+          ${menuAbierto ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
       `}>
         <div className="flex justify-between items-center mb-8 border-b border-gray-700 pb-4">
             <h2 className="text-xl font-bold text-orange-500 text-center w-full">ADMINISTRACIÓN</h2>
-            <button className="lg:hidden text-gray-400" onClick={() => setMenuAbierto(false)}><X /></button>
+            <button className="md:hidden text-gray-400" onClick={() => setMenuAbierto(false)}><X /></button>
         </div>
         
         <nav className="space-y-2 flex-1">
@@ -1196,7 +1196,7 @@ const PanelAdmin = ({ session }) => {
       </div>
 
       {/* CONTENIDO PRINCIPAL */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden w-full relative pt-16 lg:pt-0">
+      <div className="flex-1 flex flex-col h-full overflow-hidden w-full relative">
         <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-gray-50">
             {tabActual === 'dashboard' && <VistaDashboard />}
             {tabActual === 'cierres' && <VistaCierres session={session} usuarios={usuarios} />}

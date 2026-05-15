@@ -56,7 +56,7 @@ const PuntoDeVenta = ({ session }) => {
   });
   const [combos, setCombos] = useState([]);
 
-  useEffect(() => { 
+  useEffect(() => {
     cargarProductos();
     cargarCombos();
     if(inputRef.current) inputRef.current.focus();
@@ -76,6 +76,7 @@ const PuntoDeVenta = ({ session }) => {
       }
     };
     cargarNombreCajero();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const cargarCombos = async () => {
@@ -445,13 +446,13 @@ const PuntoDeVenta = ({ session }) => {
       
       {/* IZQUIERDA: PRODUCTOS */}
       <div className="flex-1 flex flex-col p-4">
-        <div className="bg-white p-4 rounded-xl shadow-sm mb-4 flex justify-between items-center">
-            <div><h1 className="text-xl font-bold text-gray-800">Punto de Venta</h1><p className="text-xs text-gray-500">{session.user.email}</p></div>
-            <div className="flex-1 mx-8 relative">
+        <div className="bg-white p-4 rounded-xl shadow-sm mb-4 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div className="w-full md:w-auto"><h1 className="text-xl font-bold text-gray-800">Punto de Venta</h1><p className="text-xs text-gray-500 hidden md:block">{session.user.email}</p></div>
+            <div className="flex-1 w-full md:mx-8 relative">
                 <Search className="absolute left-3 top-3 text-gray-400" size={20}/>
                 <input ref={inputRef} value={busqueda} onChange={manejarInput} className="w-full pl-10 p-3 rounded-lg border-2 border-blue-100 focus:border-blue-500 outline-none text-lg font-bold" placeholder="Escanear o buscar..." autoFocus />
             </div>
-            <button onClick={calcularCierre} className="bg-gray-800 text-white px-5 py-3 rounded-lg font-bold hover:bg-black flex items-center gap-2 shadow-lg"><Clock size={18}/> Cerrar</button>
+            <button onClick={calcularCierre} className="w-full md:w-auto bg-gray-800 text-white px-5 py-3 rounded-lg font-bold hover:bg-black flex items-center justify-center gap-2 shadow-lg"><Clock size={18}/> Cerrar</button>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 overflow-y-auto pb-4">
@@ -538,17 +539,17 @@ const PuntoDeVenta = ({ session }) => {
 
       {/* MODAL PAGO */}
       {modalPago && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-white p-8 rounded-2xl shadow-2xl w-96">
-                <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-black text-gray-800 flex items-center gap-2"><Calculator/> Cobrar</h2><button onClick={() => setModalPago(false)}><X className="text-gray-400 hover:text-gray-600"/></button></div>
-                <div className="text-center mb-4"><p className="text-gray-500 text-sm">Total a Pagar</p><div className="text-4xl font-black text-blue-600">{formatoMoneda(totalCarrito)}</div></div>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white p-6 md:p-8 rounded-2xl shadow-2xl w-full max-w-md">
+                <div className="flex justify-between items-center mb-6"><h2 className="text-xl md:text-2xl font-black text-gray-800 flex items-center gap-2"><Calculator/> Cobrar</h2><button onClick={() => setModalPago(false)}><X className="text-gray-400 hover:text-gray-600"/></button></div>
+                <div className="text-center mb-4"><p className="text-gray-500 text-sm">Total a Pagar</p><div className="text-3xl md:text-4xl font-black text-blue-600">{formatoMoneda(totalCarrito)}</div></div>
                 <form onSubmit={confirmarVenta} className="space-y-4">
                     <div><label className="block text-sm font-bold text-gray-700 mb-2">Método de pago</label>
                       <div className="grid grid-cols-2 gap-2">
-                        <button type="button" onClick={() => setMetodoPago('efectivo')} className={`py-2 rounded-lg font-bold text-xs ${metodoPago === 'efectivo' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600'}`}>Efectivo</button>
-                        <button type="button" onClick={() => setMetodoPago('nequi')} className={`py-2 rounded-lg font-bold text-xs ${metodoPago === 'nequi' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600'}`}>Nequi</button>
-                        <button type="button" onClick={() => setMetodoPago('bancolombia')} className={`py-2 rounded-lg font-bold text-xs ${metodoPago === 'bancolombia' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>Bancolombia</button>
-                        <button type="button" onClick={() => setMetodoPago('davivienda')} className={`py-2 rounded-lg font-bold text-xs ${metodoPago === 'davivienda' ? 'bg-yellow-500 text-white' : 'bg-gray-100 text-gray-600'}`}>Davivienda</button>
+                        <button type="button" onClick={() => setMetodoPago('efectivo')} className={`py-3 rounded-lg font-bold text-xs md:text-sm ${metodoPago === 'efectivo' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600'}`}>Efectivo</button>
+                        <button type="button" onClick={() => setMetodoPago('nequi')} className={`py-3 rounded-lg font-bold text-xs md:text-sm ${metodoPago === 'nequi' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600'}`}>Nequi</button>
+                        <button type="button" onClick={() => setMetodoPago('bancolombia')} className={`py-3 rounded-lg font-bold text-xs md:text-sm ${metodoPago === 'bancolombia' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>Bancolombia</button>
+                        <button type="button" onClick={() => setMetodoPago('davivienda')} className={`py-3 rounded-lg font-bold text-xs md:text-sm ${metodoPago === 'davivienda' ? 'bg-yellow-500 text-white' : 'bg-gray-100 text-gray-600'}`}>Davivienda</button>
                       </div>
                     </div>
                     {metodoPago === 'efectivo' && (
@@ -557,12 +558,12 @@ const PuntoDeVenta = ({ session }) => {
                         <div className="bg-gray-100 p-4 rounded-xl flex justify-between items-center"><span className="font-bold text-gray-600">Cambio:</span><span className={`text-xl font-bold ${(parseInt(pagoCon.replace(/\./g, '')) || 0) < totalCarrito ? 'text-red-500' : 'text-green-600'}`}>{formatoMoneda((parseInt(pagoCon.replace(/\./g, '')) || 0) - totalCarrito)}</span></div>
                       </>
                     )}
-                    <button 
+                    <button
   type="submit"
   disabled={procesandoVenta}
   className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg transition-all flex items-center justify-center gap-2 ${
-    procesandoVenta 
-      ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+    procesandoVenta
+      ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
       : 'bg-green-600 hover:bg-green-700 text-white active:scale-95'
   }`}
 >
@@ -596,10 +597,10 @@ const PuntoDeVenta = ({ session }) => {
 
       {/* MODAL CIERRE */}
       {modalCierre && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
-          <div className="bg-white p-8 rounded-2xl shadow-2xl w-96 text-center border-t-8 border-green-500">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn p-4">
+          <div className="bg-white p-6 md:p-8 rounded-2xl shadow-2xl w-full max-w-md text-center border-t-8 border-green-500">
             <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4"><CheckCircle size={40} className="text-green-600"/></div>
-            <h2 className="text-2xl font-black text-gray-800 mb-1">¡Turno Finalizado!</h2>
+            <h2 className="text-xl md:text-2xl font-black text-gray-800 mb-1">¡Turno Finalizado!</h2>
             <p className="text-gray-500 text-sm mb-6">Desde las: <strong>{resumenCierre.desde}</strong></p>
             <div className="bg-gray-50 p-4 rounded-xl mb-6 border border-gray-200 space-y-2 text-sm">
                 <div className="flex justify-between items-center text-gray-600"><span>Ventas (Total):</span><span className="font-bold text-gray-800">{formatoMoneda(resumenCierre.ventas)}</span></div>

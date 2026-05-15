@@ -74,7 +74,6 @@ const ComprobanteVenta = ({ datos }) => {
           </div>
         </div>
         {items.map((item) => {
-          const esComboHeader = item.esComboHeader;
           const esComboDetalle = item.esComboDetalle;
           const subtotalMostrar = item.subtotal != null ? item.subtotal : (item.precio * item.cantidad);
           const cantMostrar = item.cantidad === '-' || item.cantidad === '' ? '-' : item.cantidad;
