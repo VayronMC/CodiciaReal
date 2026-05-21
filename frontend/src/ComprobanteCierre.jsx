@@ -38,7 +38,7 @@ const ComprobanteCierre = ({ datos }) => {
         width: '72mm',
         maxWidth: '302px',
         padding: '8px',
-        fontFamily: 'monospace, \"Courier New\", monospace',
+        fontFamily: 'monospace, "Courier New", monospace',
         fontSize: '12px',
         lineHeight: 1.4,
         color: '#000',

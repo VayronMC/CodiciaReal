@@ -353,9 +353,25 @@ const VistaBodega = ({ session, usuarios }) => {
   
   const cargar = async () => {
     try {
-      const { data, error } = await supabase.from('productos').select('*').order('nombre');
-      if (error) throw error;
-      if (data) setProductos(data);
+      let allProducts = [];
+      let from = 0;
+      let to = 999;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data, error } = await supabase.from('productos').select('*').order('nombre').range(from, to);
+        if (error) throw error;
+        if (data) {
+          allProducts = [...allProducts, ...data];
+          hasMore = data.length === 1000;
+          from += 1000;
+          to += 1000;
+        } else {
+          hasMore = false;
+        }
+      }
+
+      setProductos(allProducts);
     } catch (err) {
       console.error("Error en VistaBodega.cargar:", err);
       toast.error("No se pudieron cargar los productos");
