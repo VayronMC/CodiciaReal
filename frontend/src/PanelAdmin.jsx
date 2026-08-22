@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { supabase } from './supabaseClient';
-import { LayoutDashboard, Package, DollarSign, Calendar, TrendingUp, TrendingDown, Save, Search, Truck, User, Clock, FileText, Plus, X, Edit, Trash2, CheckCircle, AlertTriangle, ShieldCheck, Barcode, Eye, EyeOff, Menu, Printer, Tag } from 'lucide-react';
+import { LayoutDashboard, Package, DollarSign, Calendar, TrendingUp, TrendingDown, Save, Search, Truck, User, Clock, FileText, Plus, X, Edit, Trash2, CheckCircle, AlertTriangle, ShieldCheck, Barcode, Eye, EyeOff, Menu, Printer, Tag, HandCoins, Scale } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import ComprobanteVenta from './ComprobanteVenta';
 import { configNegocio } from './configNegocio';
+import PanelAsistenciaNomina from './PanelAsistenciaNomina';
+import PanelFiado from './PanelFiado';
+import PanelBalance from './PanelBalance';
 
 // ==========================================
 // 1. UTILIDADES Y FECHAS
@@ -26,6 +29,28 @@ const esMismaFecha = (fechaISO, fechaFiltro) => {
   const fechaInicio = new Date(fechaFiltro + 'T00:00:00');
   const fechaFin = new Date(fechaFiltro + 'T23:59:59');
   return fecha >= fechaInicio && fecha <= fechaFin;
+};
+
+/** Rango del día en hora Colombia → ISO (para filtrar en Supabase). */
+const rangoDiaColombiaISO = (fechaYYYYMMDD) => ({
+  inicio: new Date(`${fechaYYYYMMDD}T00:00:00.000-05:00`).toISOString(),
+  fin: new Date(`${fechaYYYYMMDD}T23:59:59.999-05:00`).toISOString(),
+});
+
+/** Supabase suele limitar ~1000 filas aunque pidas más. */
+async function fetchAllRows(buildQuery) {
+  const pageSize = 1000;
+  let from = 0;
+  const all = [];
+  for (;;) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data?.length) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
 };
 
 const InputMoneda = ({ value, onChange, placeholder, autoFocus }) => {
@@ -174,21 +199,50 @@ const VistaDashboard = () => {
 
   const cargar = async () => {
     try {
-      const { data: ventas } = await supabase.from('ventas').select('total, creado_en').order('creado_en', { ascending: false }).limit(100000);
-      const { data: movs } = await supabase.from('caja_movimientos').select('*').order('creado_en', { ascending: false }).limit(100000);
+      const { inicio, fin } = rangoDiaColombiaISO(fecha);
 
-      const ventasHoy = ventas?.filter(v => esMismaFecha(v.creado_en, fecha)) || [];
-      const movsHoy = movs?.filter(m => esMismaFecha(m.creado_en, fecha)) || [];
+      // Ventas y movimientos DEL DÍA (consulta por rango, no “últimas N filas”)
+      const ventasHoy = await fetchAllRows(() =>
+        supabase
+          .from('ventas')
+          .select('total')
+          .gte('creado_en', inicio)
+          .lte('creado_en', fin)
+          .order('creado_en', { ascending: true })
+      );
 
-      const totalVentas = ventasHoy.reduce((s, v) => s + v.total, 0);
-      const gastos = movsHoy.filter(m => ['gasto', 'nomina'].includes(m.tipo)).reduce((s, m) => s + m.monto, 0);
-      const entregas = movsHoy.filter(m => m.tipo === 'entrega_turno').reduce((s, m) => s + m.monto, 0);
+      const movsHoy = await fetchAllRows(() =>
+        supabase
+          .from('caja_movimientos')
+          .select('tipo, monto')
+          .gte('creado_en', inicio)
+          .lte('creado_en', fin)
+          .in('tipo', ['gasto', 'nomina', 'entrega_turno'])
+          .order('creado_en', { ascending: true })
+      );
 
-      const histCapital = movs?.filter(m=>m.tipo==='ingreso_capital').reduce((s,m)=>s+m.monto,0)||0;
-      const histGastos = movs?.filter(m=>m.tipo==='gasto').reduce((s,m)=>s+m.monto,0)||0;
-      const histNomina = movs?.filter(m=>m.tipo==='nomina').reduce((s,m)=>s+m.monto,0)||0;
-      const histEntregas = movs?.filter(m=>m.tipo==='entrega_turno').reduce((s,m)=>s+m.monto,0)||0;
-      const histBases = movs?.filter(m=>m.tipo==='base').reduce((s,m)=>s+m.monto,0)||0;
+      const totalVentas = ventasHoy.reduce((s, v) => s + (Number(v.total) || 0), 0);
+      const gastos = movsHoy
+        .filter((m) => m.tipo === 'gasto' || m.tipo === 'nomina')
+        .reduce((s, m) => s + (Number(m.monto) || 0), 0);
+      const entregas = movsHoy
+        .filter((m) => m.tipo === 'entrega_turno')
+        .reduce((s, m) => s + (Number(m.monto) || 0), 0);
+
+      // Caja fuerte = histórico completo (paginado)
+      const movsHist = await fetchAllRows(() =>
+        supabase
+          .from('caja_movimientos')
+          .select('tipo, monto')
+          .in('tipo', ['ingreso_capital', 'gasto', 'nomina', 'entrega_turno', 'base'])
+          .order('creado_en', { ascending: true })
+      );
+
+      const histCapital = movsHist.filter((m) => m.tipo === 'ingreso_capital').reduce((s, m) => s + (Number(m.monto) || 0), 0);
+      const histGastos = movsHist.filter((m) => m.tipo === 'gasto').reduce((s, m) => s + (Number(m.monto) || 0), 0);
+      const histNomina = movsHist.filter((m) => m.tipo === 'nomina').reduce((s, m) => s + (Number(m.monto) || 0), 0);
+      const histEntregas = movsHist.filter((m) => m.tipo === 'entrega_turno').reduce((s, m) => s + (Number(m.monto) || 0), 0);
+      const histBases = movsHist.filter((m) => m.tipo === 'base').reduce((s, m) => s + (Number(m.monto) || 0), 0);
 
       const cajaFuerte = (histCapital + histEntregas) - (histGastos + histBases + histNomina);
 
@@ -906,7 +960,7 @@ const VistaHistorial = ({ usuarios }) => {
         ...x,
         tipo: 'VENTA',
         esIngreso: true,
-        desc: 'Venta productos',
+        desc: x.origen === 'fiado' ? 'Venta productos / Fiado' : 'Venta productos',
         autor: x.perfiles?.nombre_completo || usuarios.find(u => u.id === x.cajero_id)?.nombre_completo || 'Cajero',
         detalleProductos: x.detalle_ventas || [],
         detalleCombos: x.detalle_venta_combos || []
@@ -1202,6 +1256,9 @@ const PanelAdmin = ({ session, menuAbierto: menuAbiertoProp, setMenuAbierto: set
           <BotonMenu icon={<Package />} label="Bodega Y Productos" active={tabActual === 'bodega'} onClick={() => cambiarTab('bodega')} />
           <BotonMenu icon={<Tag />} label="Combos" active={tabActual === 'combos'} onClick={() => cambiarTab('combos')} />
           <BotonMenu icon={<DollarSign />} label="Caja Y Nómina" active={tabActual === 'gastos'} onClick={() => cambiarTab('gastos')} />
+          <BotonMenu icon={<Clock />} label="Asistencia y Nómina" active={tabActual === 'asistencia'} onClick={() => cambiarTab('asistencia')} />
+          <BotonMenu icon={<HandCoins />} label="Fiado" active={tabActual === 'fiado'} onClick={() => cambiarTab('fiado')} />
+          <BotonMenu icon={<Scale />} label="Balance" active={tabActual === 'balance'} onClick={() => cambiarTab('balance')} />
           <BotonMenu icon={<Calendar />} label="Ventas del Día" active={tabActual === 'historial'} onClick={() => cambiarTab('historial')} />
         </nav>
 
@@ -1219,6 +1276,9 @@ const PanelAdmin = ({ session, menuAbierto: menuAbiertoProp, setMenuAbierto: set
             {tabActual === 'bodega' && <VistaBodega session={session} usuarios={usuarios} />}
             {tabActual === 'combos' && <VistaCombos />}
             {tabActual === 'gastos' && <VistaGastos session={session} usuarios={usuarios} />}
+            {tabActual === 'asistencia' && <PanelAsistenciaNomina session={session} usuarios={usuarios} />}
+            {tabActual === 'fiado' && <PanelFiado session={session} usuarios={usuarios} />}
+            {tabActual === 'balance' && <PanelBalance session={session} />}
             {tabActual === 'historial' && <VistaHistorial usuarios={usuarios} />}
         </div>
       </div>
