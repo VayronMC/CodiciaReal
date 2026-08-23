@@ -62,8 +62,26 @@ function App() {
     } finally {
       setSession(null);
       setRolUsuario(null);
+      setVistaActual('pos');
+      setMenuAbierto(false);
+      setMenuAdminAbierto(false);
     }
   };
+
+  // Tras login (o al recuperar sesión), siempre empezar en CAJA
+  useEffect(() => {
+    if (session) {
+      setVistaActual('pos');
+      setMenuAdminAbierto(false);
+    }
+  }, [session?.user?.id]);
+
+  // Si no es admin, nunca dejar la vista de administración
+  useEffect(() => {
+    if (rolUsuario && rolUsuario !== 'admin' && vistaActual === 'admin') {
+      setVistaActual('pos');
+    }
+  }, [rolUsuario, vistaActual]);
 
   const cambiarVista = (vista) => {
     setVistaActual(vista);
@@ -179,7 +197,7 @@ function App() {
       {/* ÁREA PRINCIPAL */}
       <main className="flex-1 overflow-auto bg-gray-100 relative">
         {vistaActual === 'pos' ? (
-          <PuntoDeVenta session={session} />
+          <PuntoDeVenta session={session} rolUsuario={rolUsuario} />
         ) : (
           /* SI ES ADMIN, MOSTRAMOS EL PANEL NUEVO */
           rolUsuario === 'admin' ? <PanelAdmin session={session} menuAbierto={menuAdminAbierto} setMenuAbierto={setMenuAdminAbierto} /> : <div className="p-10 text-center text-red-500 font-bold">Acceso Denegado</div>

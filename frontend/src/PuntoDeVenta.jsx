@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { supabase } from './supabaseClient';
-import { ShoppingCart, Trash2, Search, Clock, DollarSign, CheckCircle, Package, Calculator, X, Plus, Minus, Tag } from 'lucide-react';
+import { ShoppingCart, Trash2, Search, Clock, DollarSign, CheckCircle, Package, Calculator, X, Plus, Minus, Tag, PlayCircle } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import ComprobanteVenta from './ComprobanteVenta';
 import ComprobanteCierre from './ComprobanteCierre';
 import { generarLineasVenta } from './utilsVentas';
+import {
+  obtenerRegistroAbierto,
+  iniciarTurnoEmpleado,
+  finalizarTurnoAsistenciaSiAbierto,
+} from './PanelAsistenciaNomina';
 
 // --- UTILIDADES ---
 const formatoMoneda = (valor) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(valor);
@@ -23,7 +28,12 @@ const InputMoneda = ({ value, onChange, placeholder, autoFocus }) => {
   );
 };
 
-const PuntoDeVenta = ({ session }) => {
+const PuntoDeVenta = ({ session, rolUsuario }) => {
+  const esAdmin = rolUsuario === 'admin';
+  const [verificandoTurno, setVerificandoTurno] = useState(true);
+  const [turnoIniciado, setTurnoIniciado] = useState(false);
+  const [iniciandoTurno, setIniciandoTurno] = useState(false);
+
   const [productos, setProductos] = useState([]);
   const [carrito, setCarrito] = useState([]);
   const [busqueda, setBusqueda] = useState('');
@@ -56,11 +66,41 @@ const PuntoDeVenta = ({ session }) => {
   });
   const [combos, setCombos] = useState([]);
 
+  // Admin: acceso directo. Empleado: exige turno de asistencia abierto.
   useEffect(() => {
+    if (rolUsuario == null) return;
+
+    if (rolUsuario === 'admin') {
+      setTurnoIniciado(true);
+      setVerificandoTurno(false);
+      return;
+    }
+
+    let cancelado = false;
+    (async () => {
+      setVerificandoTurno(true);
+      try {
+        const abierto = await obtenerRegistroAbierto(session.user.id);
+        if (!cancelado) setTurnoIniciado(Boolean(abierto));
+      } catch (err) {
+        console.error('Error verificando turno:', err);
+        if (!cancelado) {
+          setTurnoIniciado(false);
+          toast.error('No se pudo verificar el turno. ¿Existe la tabla de asistencia?');
+        }
+      } finally {
+        if (!cancelado) setVerificandoTurno(false);
+      }
+    })();
+
+    return () => { cancelado = true; };
+  }, [rolUsuario, session.user.id]);
+
+  useEffect(() => {
+    if (!turnoIniciado) return;
     cargarProductos();
     cargarCombos();
-    if(inputRef.current) inputRef.current.focus();
-    // Obtener nombre del cajero desde perfiles
+    if (inputRef.current) inputRef.current.focus();
     const cargarNombreCajero = async () => {
       try {
         const { data, error } = await supabase
@@ -77,7 +117,21 @@ const PuntoDeVenta = ({ session }) => {
     };
     cargarNombreCajero();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [turnoIniciado]);
+
+  const handleIniciarTurno = async () => {
+    setIniciandoTurno(true);
+    try {
+      await iniciarTurnoEmpleado(session.user.id);
+      setTurnoIniciado(true);
+      toast.success('Turno iniciado');
+    } catch (err) {
+      console.error('Error iniciando turno:', err);
+      toast.error(err.message || 'No se pudo iniciar el turno');
+    } finally {
+      setIniciandoTurno(false);
+    }
+  };
 
   const cargarCombos = async () => {
     try {
@@ -355,8 +409,17 @@ const PuntoDeVenta = ({ session }) => {
         tipo: 'entrega_turno', descripcion: 'Cierre de Turno', monto: resumenCierre.total, usuario_id: session.user.id, estado_cierre: 'pendiente'
       }]);
       if (error) throw error;
+
+      // Si hay turno de asistencia abierto (empleados), registrar salida.
+      // Admin sin turno de asistencia: no hace nada.
+      try {
+        await finalizarTurnoAsistenciaSiAbierto(session.user.id);
+      } catch (errAsis) {
+        console.error('Error cerrando asistencia al salir:', errAsis);
+        toast.error('Caja cerrada, pero no se pudo registrar la salida de asistencia');
+      }
+
       toast.success("Turno Cerrado");
-      // Preparar datos para comprobante de cierre
       setDatosCierreImprimir({
         ...resumenCierre,
         cajeroNombre: nombreCajero,
@@ -439,6 +502,41 @@ const PuntoDeVenta = ({ session }) => {
     else eliminarDelCarrito(linea.id);
   };
   const productosFiltrados = productos.filter(p => p.nombre.toLowerCase().includes(busqueda.toLowerCase()));
+
+  if (rolUsuario == null || verificandoTurno) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+        <Toaster position="top-center" />
+        <p className="text-gray-500 font-bold">Verificando turno...</p>
+      </div>
+    );
+  }
+
+  if (!esAdmin && !turnoIniciado) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+        <Toaster position="top-center" />
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center space-y-4">
+          <div className="mx-auto w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center">
+            <PlayCircle className="text-blue-600" size={36} />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-800">Iniciar turno</h1>
+          <p className="text-sm text-gray-500">
+            Antes de usar la caja debes iniciar tu turno. Quedará registrado en asistencia.
+          </p>
+          <p className="text-xs text-gray-400">{session.user.email}</p>
+          <button
+            type="button"
+            onClick={handleIniciarTurno}
+            disabled={iniciandoTurno}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg disabled:opacity-50"
+          >
+            {iniciandoTurno ? 'Iniciando...' : 'Iniciar turno'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col md:flex-row min-h-screen bg-gray-100 font-sans overflow-hidden">

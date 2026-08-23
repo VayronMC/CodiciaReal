@@ -55,17 +55,15 @@ const horasEntre = (horaEntrada, horaSalida) => {
 // ==========================================
 
 /**
- * Busca el registro abierto de hoy (entrada sin salida) de un empleado.
+ * Busca cualquier turno abierto (entrada sin salida) del empleado.
+ * Sirve para el acceso a caja y emergencias del admin (también turnos de otro día).
  */
-export async function obtenerRegistroAbiertoHoy(empleadoId) {
-  const hoy = fechaHoyLocal();
+export async function obtenerRegistroAbierto(empleadoId) {
   const { data, error } = await supabase
     .from('registros_asistencia')
     .select('*')
     .eq('empleado_id', empleadoId)
     .is('hora_salida', null)
-    .gte('hora_entrada', inicioDelDiaISO(hoy))
-    .lte('hora_entrada', finDelDiaISO(hoy))
     .order('hora_entrada', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -75,12 +73,65 @@ export async function obtenerRegistroAbiertoHoy(empleadoId) {
 }
 
 /**
- * Registra entrada o salida según el estado actual del empleado.
- * - Sin registro abierto hoy → crea entrada
- * - Con entrada sin salida → actualiza salida
+ * Registro abierto de hoy (para el botón del panel admin en el día actual).
+ */
+export async function obtenerRegistroAbiertoHoy(empleadoId) {
+  const hoy = fechaHoyLocal();
+  const abierto = await obtenerRegistroAbierto(empleadoId);
+  if (!abierto) return null;
+  const fechaEntrada = fechaLocalDesdeISO(abierto.hora_entrada);
+  return fechaEntrada === hoy ? abierto : null;
+}
+
+/**
+ * El empleado inicia su propio turno (acceso a caja).
+ * Si ya tiene turno abierto, no crea otro.
+ */
+export async function iniciarTurnoEmpleado(empleadoId) {
+  const abierto = await obtenerRegistroAbierto(empleadoId);
+  if (abierto) return { accion: 'ya_abierto', registro: abierto };
+
+  const ahora = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('registros_asistencia')
+    .insert([{
+      empleado_id: empleadoId,
+      hora_entrada: ahora,
+      hora_salida: null,
+      registrado_por: empleadoId,
+    }])
+    .select()
+    .single();
+  if (error) throw error;
+  return { accion: 'entrada', registro: data };
+}
+
+/**
+ * Cierra asistencia si hay turno abierto. Si no hay, no hace nada.
+ * Usado en "Confirmar y salir" (caja) y no obliga a los admin sin turno.
+ */
+export async function finalizarTurnoAsistenciaSiAbierto(empleadoId) {
+  const abierto = await obtenerRegistroAbierto(empleadoId);
+  if (!abierto) return { accion: 'sin_turno', registro: null };
+
+  const ahora = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('registros_asistencia')
+    .update({ hora_salida: ahora })
+    .eq('id', abierto.id)
+    .select()
+    .single();
+  if (error) throw error;
+  return { accion: 'salida', registro: data };
+}
+
+/**
+ * Emergencia admin: registra entrada o salida según estado.
+ * - Sin turno abierto → crea entrada
+ * - Con turno abierto → cierra salida
  */
 export async function registrarEntradaOSalida(empleadoId, adminId) {
-  const abierto = await obtenerRegistroAbiertoHoy(empleadoId);
+  const abierto = await obtenerRegistroAbierto(empleadoId);
   const ahora = new Date().toISOString();
 
   if (!abierto) {
@@ -233,7 +284,8 @@ const PanelAsistenciaNomina = ({ session, usuarios }) => {
 
   const refrescarEstadoAsistencia = async (empleadoId) => {
     try {
-      const abierto = await obtenerRegistroAbiertoHoy(empleadoId);
+      // En panel admin mostramos si hay turno abierto (aunque sea de otro día)
+      const abierto = await obtenerRegistroAbierto(empleadoId);
       setRegistroAbierto(abierto);
 
       const hoy = fechaHoyLocal();
@@ -313,15 +365,21 @@ const PanelAsistenciaNomina = ({ session, usuarios }) => {
         <Clock className="text-indigo-600" />
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Asistencia y Nómina</h2>
-          <p className="text-sm text-gray-500">El administrador registra entradas/salidas y calcula el pago quincenal.</p>
+          <p className="text-sm text-gray-500">
+            Los empleados inician y cierran turno desde la caja. Aquí el admin corrige en emergencia y calcula la nómina.
+          </p>
         </div>
       </div>
 
       {/* ——— ASISTENCIA ——— */}
       <section className="bg-white p-6 rounded-xl shadow-lg space-y-4">
         <h3 className="font-bold text-lg flex items-center gap-2">
-          <User size={18} className="text-indigo-500" /> Registrar asistencia
+          <User size={18} className="text-indigo-500" /> Registrar asistencia (emergencia)
         </h3>
+        <p className="text-sm text-gray-500">
+          Uso normal: el empleado inicia turno en caja y sale con &quot;Confirmar y salir&quot;.
+          Aquí solo corrige entradas/salidas cuando haga falta.
+        </p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
           <div className="md:col-span-2">
