@@ -394,6 +394,9 @@ const VistaCierres = ({ session, usuarios }) => {
 const VistaBodega = ({ session, usuarios }) => {
   const [productos, setProductos] = useState([]);
   const [busqueda, setBusqueda] = useState('');
+  const [pagina, setPagina] = useState(1);
+  const [totalProductos, setTotalProductos] = useState(0);
+  const [paginaInput, setPaginaInput] = useState('');
   const [modalRestock, setModalRestock] = useState(null);
   const [modalEditar, setModalEditar] = useState(null);
   const [modalNuevo, setModalNuevo] = useState(false);
@@ -403,29 +406,24 @@ const VistaBodega = ({ session, usuarios }) => {
   const [formCant, setFormCant] = useState(''); const [formCosto, setFormCosto] = useState('');
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { cargar(); cargarHistorial(); }, [fecha, usuarios]);
+  useEffect(() => { cargar(pagina); cargarHistorial(); }, [fecha, usuarios, pagina]);
   
-  const cargar = async () => {
+  const PAGE_SIZE = 100;
+  const cargar = async (paginaActual = 1) => {
     try {
-      let allProducts = [];
-      let from = 0;
-      let to = 999;
-      let hasMore = true;
+      const from = (paginaActual - 1) * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
 
-      while (hasMore) {
-        const { data, error } = await supabase.from('productos').select('*').order('nombre').range(from, to);
-        if (error) throw error;
-        if (data) {
-          allProducts = [...allProducts, ...data];
-          hasMore = data.length === 1000;
-          from += 1000;
-          to += 1000;
-        } else {
-          hasMore = false;
-        }
-      }
+      const { data, error, count } = await supabase
+        .from('vw_productos_publicos')
+        .select('*', { count: 'exact' })
+        .order('has_stock', { ascending: false })
+        .order('nombre', { ascending: true })
+        .range(from, to);
 
-      setProductos(allProducts);
+      if (error) throw error;
+      setProductos(data || []);
+      setTotalProductos(count || 0);
     } catch (err) {
       console.error("Error en VistaBodega.cargar:", err);
       toast.error("No se pudieron cargar los productos");
@@ -537,8 +535,26 @@ const VistaBodega = ({ session, usuarios }) => {
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full animate-fadeIn">
        <div className="lg:col-span-2 flex flex-col h-full bg-white rounded-xl shadow overflow-hidden">
          <div className="p-4 border-b flex justify-between">
-           <input placeholder="Buscar producto..." className="border p-2 rounded w-1/2" onChange={e=>setBusqueda(e.target.value)}/>
-           <button onClick={()=>{setModalNuevo(true); setProdForm({codigo:'', nombre:'', precio:'', stock:'', precio_mayoreo:'', umbral_mayoreo:''})}} className="bg-purple-600 text-white px-4 py-2 rounded font-bold flex items-center gap-2"><Plus size={16}/> Nuevo</button>
+           <div className="flex items-center gap-2">
+             <input placeholder="Buscar producto..." className="border p-2 rounded w-72" onChange={e=>setBusqueda(e.target.value)}/>
+             <button onClick={()=>{setModalNuevo(true); setProdForm({codigo:'', nombre:'', precio:'', stock:'', precio_mayoreo:'', umbral_mayoreo:''})}} className="bg-purple-600 text-white px-4 py-2 rounded font-bold flex items-center gap-2"><Plus size={16}/> Nuevo</button>
+           </div>
+           <div className="flex items-center gap-2">
+             <div className="text-sm text-gray-600">Página {pagina} de {Math.max(1, Math.ceil((totalProductos || 0) / PAGE_SIZE))} — {totalProductos || 0} productos</div>
+             <div className="flex gap-2 items-center">
+               <button onClick={() => setPagina(Math.max(1, pagina - 1))} disabled={pagina <= 1} className="px-3 py-1 bg-gray-100 rounded disabled:opacity-50">Anterior</button>
+               <button onClick={() => setPagina(Math.min(Math.max(1, Math.ceil((totalProductos || 0) / PAGE_SIZE)), pagina + 1))} disabled={pagina >= Math.max(1, Math.ceil((totalProductos || 0) / PAGE_SIZE))} className="px-3 py-1 bg-gray-100 rounded disabled:opacity-50">Siguiente</button>
+               <div className="flex items-center gap-2">
+                 <input type="number" min="1" placeholder="Ir a" value={paginaInput} onChange={e=>setPaginaInput(e.target.value)} className="w-20 p-1 border rounded text-sm" />
+                 <button onClick={() => {
+                   const maxPage = Math.max(1, Math.ceil((totalProductos || 0) / PAGE_SIZE));
+                   const p = Math.min(maxPage, Math.max(1, parseInt(paginaInput) || 1));
+                   setPaginaInput('');
+                   setPagina(p);
+                 }} className="px-3 py-1 bg-blue-600 text-white rounded">Ir</button>
+               </div>
+             </div>
+           </div>
          </div>
          <div className="overflow-y-auto flex-1">
             <table className="w-full text-sm text-left">

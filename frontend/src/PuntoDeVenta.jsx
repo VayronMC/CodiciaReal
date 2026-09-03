@@ -35,6 +35,9 @@ const PuntoDeVenta = ({ session, rolUsuario }) => {
   const [iniciandoTurno, setIniciandoTurno] = useState(false);
 
   const [productos, setProductos] = useState([]);
+  const [pagina, setPagina] = useState(1);
+  const [totalProductos, setTotalProductos] = useState(0);
+  const [paginaInput, setPaginaInput] = useState('');
   const [carrito, setCarrito] = useState([]);
   const [busqueda, setBusqueda] = useState('');
   
@@ -146,11 +149,54 @@ const PuntoDeVenta = ({ session, rolUsuario }) => {
     }
   };
 
-  const cargarProductos = async () => {
+  const PAGE_SIZE = 100;
+
+  const cargarProductos = async (paginaActual = 1) => {
     try {
-      const { data, error } = await supabase.from('productos').select('*').eq('activo', true).gt('stock', 0);
+      // Try to fetch a single page from the DB ordered by stock desc.
+      const from = (paginaActual - 1) * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      // Prefer view 'vw_productos_publicos' with has_stock boolean for correct ordering
+      let data = null;
+      let error = null;
+      let count = 0;
+
+      try {
+        const res = await supabase
+          .from('vw_productos_publicos')
+          .select('*', { count: 'exact' })
+          .order('has_stock', { ascending: false })
+          .order('nombre', { ascending: true })
+          .range(from, to);
+        data = res.data;
+        error = res.error;
+        count = res.count;
+      } catch (e) {
+        // view may not exist; fallback to table ordered by nombre and then client-side grouping
+        console.info('vw_productos_publicos no disponible, usando productos table fallback', e?.message || e);
+        const res = await supabase
+          .from('productos')
+          .select('*', { count: 'exact' })
+          .eq('activo', true)
+          .order('nombre', { ascending: true })
+          .range(from, to);
+        data = res.data;
+        error = res.error;
+        count = res.count;
+      }
+
       if (error) throw error;
-      if (data) setProductos(data);
+
+      const lista = (data || []).map(p => ({ ...p, stock: p.stock == null ? 0 : Number(p.stock) }));
+
+      // If view used, it already orders by has_stock desc then nombre asc.
+      // For fallback, ensure items with stock == 0 appear at the end of the page.
+      const conStock = lista.filter(p => p.stock > 0).sort((a, b) => a.nombre.localeCompare(b.nombre));
+      const sinStock = lista.filter(p => p.stock <= 0).sort((a, b) => a.nombre.localeCompare(b.nombre));
+      setProductos([...conStock, ...sinStock]);
+      setPagina(paginaActual);
+      setTotalProductos(count || 0);
     } catch (err) {
       console.error("Error en cargarProductos:", err);
       toast.error("No se pudieron cargar los productos");
@@ -199,10 +245,18 @@ const PuntoDeVenta = ({ session, rolUsuario }) => {
     setCarrito(carrito.filter(item => item.id !== id));
   };
 
-  const manejarInput = (e) => {
+  const manejarInput = async (e) => {
     const valor = e.target.value;
     setBusqueda(valor);
-    const productoExacto = productos.find(p => p.codigo_barras === valor);
+    let productoExacto = productos.find(p => p.codigo_barras === valor);
+    if (!productoExacto) {
+      try {
+        const { data } = await supabase.from('productos').select('*').eq('codigo_barras', valor).maybeSingle();
+        if (data) productoExacto = data;
+      } catch (err) {
+        console.error('Error buscando por código de barras:', err);
+      }
+    }
     if (productoExacto) {
       agregarAlCarrito(productoExacto);
       setBusqueda('');
@@ -463,29 +517,45 @@ const PuntoDeVenta = ({ session, rolUsuario }) => {
 
   const agregarComboAlCarrito = (combo, cant) => {
     if (!combo.combo_productos?.length) return;
-    for (const cp of combo.combo_productos) {
-      const prod = productos.find((p) => p.id === cp.producto_id);
-      if (!prod) continue;
-      const idx = carrito.findIndex((i) => i.id === prod.id);
-      const actual = idx >= 0 ? carrito[idx].cantidad : 0;
-      const sumar = (cp.cantidad || 1) * cant;
-      if (actual + sumar > prod.stock) {
-        toast.error(`No hay stock para el combo "${combo.nombre}". Falta ${prod.nombre}`);
-        return;
-      }
-    }
-    setCarrito((curr) => {
-      const nuevo = [...curr];
-      combo.combo_productos.forEach((cp) => {
-        const prod = productos.find((p) => p.id === cp.producto_id);
-        if (!prod) return;
-        const idx = nuevo.findIndex((i) => i.id === prod.id);
+    // Run async checks/fetches inside IIFE so callers don't have to await
+    (async () => {
+      // Validate availability
+      for (const cp of combo.combo_productos) {
+        let prod = productos.find((p) => String(p.id) === String(cp.producto_id));
+        if (!prod) {
+          try {
+            const { data } = await supabase.from('productos').select('*').eq('id', cp.producto_id).maybeSingle();
+            prod = data;
+          } catch (err) {
+            console.error('Error fetching product for combo:', err);
+            prod = null;
+          }
+        }
+        if (!prod) continue;
+        const idx = carrito.findIndex((i) => String(i.id) === String(prod.id));
+        const actual = idx >= 0 ? carrito[idx].cantidad : 0;
         const sumar = (cp.cantidad || 1) * cant;
-        if (idx >= 0) nuevo[idx] = { ...nuevo[idx], cantidad: nuevo[idx].cantidad + sumar };
-        else nuevo.push({ ...prod, cantidad: sumar });
+        if (actual + sumar > (prod.stock || 0)) {
+          toast.error(`No hay stock para el combo "${combo.nombre}". Falta ${prod.nombre}`);
+          return;
+        }
+      }
+
+      // Apply to carrito
+      setCarrito((curr) => {
+        const nuevo = [...curr];
+        combo.combo_productos.forEach((cp) => {
+          let prod = nuevo.find((i) => String(i.id) === String(cp.producto_id)) || productos.find((p) => String(p.id) === String(cp.producto_id));
+          // If still missing, try to fetch synchronously (best-effort)
+          if (!prod) return;
+          const idx = nuevo.findIndex((i) => String(i.id) === String(prod.id));
+          const sumar = (cp.cantidad || 1) * cant;
+          if (idx >= 0) nuevo[idx] = { ...nuevo[idx], cantidad: nuevo[idx].cantidad + sumar };
+          else nuevo.push({ ...prod, cantidad: sumar });
+        });
+        return nuevo;
       });
-      return nuevo;
-    });
+    })();
   };
 
   const modificarCantidadLinea = (linea, delta) => {
@@ -552,13 +622,30 @@ const PuntoDeVenta = ({ session, rolUsuario }) => {
             </div>
             <button onClick={calcularCierre} className="w-full md:w-auto bg-gray-800 text-white px-5 py-3 rounded-lg font-bold hover:bg-black flex items-center justify-center gap-2 shadow-lg"><Clock size={18}/> Cerrar</button>
         </div>
+        <div className="flex items-center justify-between mb-2 px-1">
+          <div className="text-sm text-gray-600">Página {pagina} de {Math.max(1, Math.ceil((totalProductos || 0) / PAGE_SIZE))} — {totalProductos || 0} productos</div>
+          <div className="flex gap-2 items-center">
+            <button onClick={() => cargarProductos(pagina - 1)} disabled={pagina <= 1} className="px-3 py-1 bg-gray-100 rounded disabled:opacity-50">Anterior</button>
+            <button onClick={() => cargarProductos(Math.min(Math.max(1, Math.ceil((totalProductos || 0) / PAGE_SIZE)), pagina + 1))} disabled={pagina >= Math.max(1, Math.ceil((totalProductos || 0) / PAGE_SIZE))} className="px-3 py-1 bg-gray-100 rounded disabled:opacity-50">Siguiente</button>
+            <div className="flex items-center gap-2">
+              <input type="number" min="1" placeholder="Ir a" value={paginaInput} onChange={e=>setPaginaInput(e.target.value)} className="w-20 p-1 border rounded text-sm" />
+              <button onClick={() => {
+                const maxPage = Math.max(1, Math.ceil((totalProductos || 0) / PAGE_SIZE));
+                const p = Math.min(maxPage, Math.max(1, parseInt(paginaInput) || 1));
+                setPaginaInput('');
+                cargarProductos(p);
+              }} className="px-3 py-1 bg-blue-600 text-white rounded">Ir</button>
+            </div>
+          </div>
+        </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 overflow-y-auto pb-4">
           {productosFiltrados.map(p => (
-            <div key={p.id} onClick={() => agregarAlCarrito(p)} className="bg-white p-4 rounded-lg shadow-sm border hover:border-blue-500 cursor-pointer transition-all flex flex-col justify-between h-32 hover:bg-blue-50 group">
+            <div key={p.id} onClick={p.stock > 0 ? () => agregarAlCarrito(p) : undefined} className={`bg-white p-4 rounded-lg shadow-sm border transition-all flex flex-col justify-between h-32 group ${p.stock > 0 ? 'hover:border-blue-500 cursor-pointer hover:bg-blue-50' : 'opacity-60 cursor-not-allowed'}`}>
                 <div className="flex justify-between items-start"><span className="bg-gray-100 text-gray-600 text-[10px] px-2 py-1 rounded font-bold">{p.codigo_barras || 'S/C'}</span><Package size={20} className="text-gray-300 group-hover:text-blue-500"/></div>
                 <div className="font-bold text-gray-800 leading-tight line-clamp-2">{p.nombre}</div>
                 <div className="flex justify-between items-end"><span className="text-blue-600 font-black text-lg">{formatoMoneda(p.precio)}</span><span className="text-xs text-gray-400">Stock: {p.stock}</span></div>
+                {p.stock <= 0 && <div className="mt-2 text-xs text-red-500 font-bold">Sin stock</div>}
             </div>
           ))}
         </div>
