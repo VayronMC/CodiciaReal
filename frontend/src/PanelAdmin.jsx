@@ -394,6 +394,8 @@ const VistaCierres = ({ session, usuarios }) => {
 const VistaBodega = ({ session, usuarios }) => {
   const [productos, setProductos] = useState([]);
   const [busqueda, setBusqueda] = useState('');
+  const [resultadosBusqueda, setResultadosBusqueda] = useState([]);
+  const busquedaIdRef = useRef(0);
   const [pagina, setPagina] = useState(1);
   const [totalProductos, setTotalProductos] = useState(0);
   const [paginaInput, setPaginaInput] = useState('');
@@ -529,19 +531,45 @@ const VistaBodega = ({ session, usuarios }) => {
     }
   };
 
-  const filtrados = productos.filter(p => p.nombre.toLowerCase().includes(busqueda.toLowerCase()));
+  const manejarBusqueda = async (e) => {
+    const valor = e.target.value;
+    setBusqueda(valor);
+    const busquedaId = ++busquedaIdRef.current;
+
+    if (!valor.trim()) {
+      setResultadosBusqueda([]);
+      return;
+    }
+
+    setResultadosBusqueda([]);
+    try {
+      const { data, error } = await supabase
+        .from('vw_productos_publicos')
+        .select('*')
+        .ilike('nombre', `%${valor.trim()}%`)
+        .order('has_stock', { ascending: false })
+        .order('nombre', { ascending: true });
+      if (error) throw error;
+      if (busquedaId === busquedaIdRef.current) setResultadosBusqueda(data || []);
+    } catch (err) {
+      console.error('Error buscando producto por nombre:', err);
+      if (busquedaId === busquedaIdRef.current) setResultadosBusqueda([]);
+    }
+  };
+
+  const filtrados = busqueda.trim() ? resultadosBusqueda : productos;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full animate-fadeIn">
-       <div className="lg:col-span-2 flex flex-col h-full bg-white rounded-xl shadow overflow-hidden">
-         <div className="p-4 border-b flex justify-between">
-           <div className="flex items-center gap-2">
-             <input placeholder="Buscar producto..." className="border p-2 rounded w-72" onChange={e=>setBusqueda(e.target.value)}/>
-             <button onClick={()=>{setModalNuevo(true); setProdForm({codigo:'', nombre:'', precio:'', stock:'', precio_mayoreo:'', umbral_mayoreo:''})}} className="bg-purple-600 text-white px-4 py-2 rounded font-bold flex items-center gap-2"><Plus size={16}/> Nuevo</button>
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 min-h-full lg:h-full animate-fadeIn">
+       <div className="lg:col-span-2 flex flex-col min-h-[28rem] lg:h-full bg-white rounded-xl shadow overflow-hidden">
+         <div className="p-3 sm:p-4 border-b space-y-3">
+           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+             <input placeholder="Buscar producto..." className="border p-2 rounded w-full sm:flex-1 min-w-0" value={busqueda} onChange={manejarBusqueda}/>
+             <button onClick={()=>{setModalNuevo(true); setProdForm({codigo:'', nombre:'', precio:'', stock:'', precio_mayoreo:'', umbral_mayoreo:''})}} className="bg-purple-600 text-white px-4 py-2 rounded font-bold flex items-center justify-center gap-2 shrink-0"><Plus size={16}/> Nuevo</button>
            </div>
-           <div className="flex items-center gap-2">
-             <div className="text-sm text-gray-600">Página {pagina} de {Math.max(1, Math.ceil((totalProductos || 0) / PAGE_SIZE))} — {totalProductos || 0} productos</div>
-             <div className="flex gap-2 items-center">
+           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+             <div className="text-xs sm:text-sm text-gray-600">{busqueda.trim() ? `${filtrados.length} resultados` : `Página ${pagina} de ${Math.max(1, Math.ceil((totalProductos || 0) / PAGE_SIZE))} — ${totalProductos || 0} productos`}</div>
+             <div className={`flex flex-wrap gap-2 items-center ${busqueda.trim() ? 'hidden' : ''}`}>
                <button onClick={() => setPagina(Math.max(1, pagina - 1))} disabled={pagina <= 1} className="px-3 py-1 bg-gray-100 rounded disabled:opacity-50">Anterior</button>
                <button onClick={() => setPagina(Math.min(Math.max(1, Math.ceil((totalProductos || 0) / PAGE_SIZE)), pagina + 1))} disabled={pagina >= Math.max(1, Math.ceil((totalProductos || 0) / PAGE_SIZE))} className="px-3 py-1 bg-gray-100 rounded disabled:opacity-50">Siguiente</button>
                <div className="flex items-center gap-2">
@@ -556,8 +584,8 @@ const VistaBodega = ({ session, usuarios }) => {
              </div>
            </div>
          </div>
-         <div className="overflow-y-auto flex-1">
-            <table className="w-full text-sm text-left">
+        <div className="overflow-auto flex-1">
+          <table className="w-full min-w-[620px] text-sm text-left">
               <thead className="bg-gray-50 sticky top-0"><tr><th className="p-3">Producto</th><th className="p-3">Precio</th><th className="p-3">Stock</th><th className="p-3 text-right">Acciones</th></tr></thead>
               <tbody>
                 {filtrados.map(p=>(
@@ -583,7 +611,7 @@ const VistaBodega = ({ session, usuarios }) => {
          </div>
        </div>
 
-       <div className="bg-white rounded-xl shadow p-4 h-full overflow-y-auto hidden lg:block">
+      <div className="bg-white rounded-xl shadow p-4 lg:h-full overflow-y-auto">
          <div className="flex justify-between items-center border-b pb-2 mb-2">
             <h3 className="font-bold uppercase text-xs">📝 Historial (Día)</h3>
             <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className="text-xs border rounded p-1" />
