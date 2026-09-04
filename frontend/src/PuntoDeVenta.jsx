@@ -40,6 +40,8 @@ const PuntoDeVenta = ({ session, rolUsuario }) => {
   const [paginaInput, setPaginaInput] = useState('');
   const [carrito, setCarrito] = useState([]);
   const [busqueda, setBusqueda] = useState('');
+  const [resultadosBusqueda, setResultadosBusqueda] = useState([]);
+  const busquedaIdRef = useRef(0);
   
   const inputRef = useRef(null);
   const comprobanteRef = useRef(null);
@@ -248,6 +250,27 @@ const PuntoDeVenta = ({ session, rolUsuario }) => {
   const manejarInput = async (e) => {
     const valor = e.target.value;
     setBusqueda(valor);
+    const busquedaId = ++busquedaIdRef.current;
+
+    if (!valor.trim()) {
+      setResultadosBusqueda([]);
+    } else {
+      try {
+        const { data, error } = await supabase
+          .from('productos')
+          .select('*')
+          .eq('activo', true)
+          .ilike('nombre', `%${valor.trim()}%`)
+          .order('nombre', { ascending: true });
+        if (error) throw error;
+        if (busquedaId === busquedaIdRef.current) {
+          setResultadosBusqueda((data || []).map(p => ({ ...p, stock: p.stock == null ? 0 : Number(p.stock) })));
+        }
+      } catch (err) {
+        console.error('Error buscando producto por nombre:', err);
+      }
+    }
+
     let productoExacto = productos.find(p => p.codigo_barras === valor);
     if (!productoExacto) {
       try {
@@ -571,7 +594,9 @@ const PuntoDeVenta = ({ session, rolUsuario }) => {
     if (linea.esCombo) quitarComboDelCarrito(linea.combo, linea.cantidad);
     else eliminarDelCarrito(linea.id);
   };
-  const productosFiltrados = productos.filter(p => p.nombre.toLowerCase().includes(busqueda.toLowerCase()));
+  const productosFiltrados = busqueda.trim()
+    ? resultadosBusqueda
+    : productos;
 
   if (rolUsuario == null || verificandoTurno) {
     return (
